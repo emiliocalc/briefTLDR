@@ -1,0 +1,52 @@
+{
+  "_ultima_actualizacion": "2026-03-19",
+
+  "holdings": {
+    "VT": {
+      "shares": 5.22474414,
+      "avg_price": 143.37,
+      "target_weight": 0.40,
+      "broker": "DriveWealth",
+      "notas": "Core global — crecimiento mundial"
+    },
+    "AVUV": {
+      "shares": 3.45692295,
+      "avg_price": 108.19,
+      "target_weight": 0.20,
+      "broker": "DriveWealth",
+      "notas": "Factor small cap value USA"
+    },
+    "IAU": {
+      "shares": 2.86417296,
+      "avg_price": 98.11,
+      "target_weight": 0.15,
+      "broker": "DriveWealth",
+      "notas": "Hedge — store of value"
+    },
+    "IBIT": {
+      "shares": 8.97313033,
+      "avg_price": 38.61,
+      "target_weight": 0.15,
+      "broker": "DriveWealth",
+      "notas": "BTC — asimetría digital"
+    },
+    "AVDV": {
+      "shares": 1.81835051,
+      "avg_price": 103.47,
+      "target_weight": 0.10,
+      "broker": "DriveWealth",
+      "notas": "Factor small cap value ex-USA"
+    }
+  },
+
+  "legacy_a_liquidar": {
+    "AAPL": { "shares": 0.24143144, "avg_price": 270.14, "valor_actual": 60.34,  "estado": "liquidar" },
+    "NVDA": { "shares": 0.54497311, "avg_price": 184.71, "valor_actual": 98.31,  "estado": "liquidar" },
+    "SLV":  { "shares": 0.79254123, "avg_price": 75.71,  "valor_actual": 54.45,  "estado": "liquidar" },
+    "VGT":  { "shares": 0.74719613, "avg_price": 733.49, "valor_actual": 537.87, "estado": "liquidar" }
+  },
+
+  "cash_disponible_usd": 0,
+  "dca_mensual_usd": 0,
+  "proximo_dca": "2026-04-01"
+}

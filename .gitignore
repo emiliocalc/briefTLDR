@@ -1,0 +1,32 @@
+# API keys — nunca al repo
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+
+# Datos que se regeneran
+data/macro/
+data/yf_cache/
+data/closes_long.csv
+data/returns_daily.csv
+data/correlations_1y.csv
+data/cnn_fg_cache.json
+data/narrative_log.csv
+data/snapshot_today.json
+data/news/
+data/research/
+data/transactions.csv
+
+# Output pipeline 1 y 2 (solo pipeline 3 va al repo)
+data/daily_summaries/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].pdf
+data/daily_summaries/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+data/daily_summaries/*_p2.*
+output/
+
+# IDE
+.vscode/
+*.swp
