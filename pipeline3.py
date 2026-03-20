@@ -394,6 +394,7 @@ def build_tldr(interp, cnn, btc, closes, fred):
 {interp}
 
 REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas.
 
 Genera un TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ".
 Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante del dia con numero, \
@@ -419,6 +420,7 @@ def build_3m_view(interp, closes, fred):
 
 REGLA para datos historicos: cada variacion porcentual pasada debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
 REGLA para proyecciones: NO uses etiquetas de horizonte. Usa lenguaje temporal claro: "en 3 meses", "hacia junio", "en el proximo trimestre".
+CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas.
 
 Genera un 3M VIEW (perspectiva proximos 3 meses) con EXACTAMENTE 5 bullets en espanol, \
 comenzando cada uno con "- ".
@@ -443,6 +445,7 @@ def build_wwcm(interp, tensions):
 {interp}
 
 REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas.
 
 Tensiones detectadas automaticamente:
 {tens_txt}
@@ -512,7 +515,7 @@ class PDF(FPDF):
         self.set_text_color(0, 0, 0)
         self.ln(1)
 
-    def body(self, text, size=8, indent=8):
+    def body(self, text, size=8, indent=10):
         self.set_font('Helvetica', '', size)
         old_lm = self.l_margin
         self.set_left_margin(indent)
@@ -666,36 +669,39 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(1)
 
     # ── Interpretacion base ───────────────────────────────────────────────────
+    _LABEL_MAP = {
+        'REGIMEN': 'Régimen', 'CAUSA_RAIZ': 'Causa Raíz',
+        'SENALES': 'Señales', 'DIVERGENCIAS': 'Divergencias',
+    }
     pdf.section('[I] INTERPRETACION BASE', min_space=90)
     if interp:
         for line in interp.split('\n'):
             line = line.strip()
             if not line:
                 pdf.ln(1)
-            elif line.startswith('-'):
-                pdf.bullet(line, size=7.5)
-            elif ':' in line and line.split(':')[0].replace('_', ' ').isupper():
+            elif ':' in line and line.split(':')[0].strip().upper().replace(' ', '_') in _LABEL_MAP:
                 parts = line.split(':', 1)
-                label = parts[0].strip()
+                raw_label = parts[0].strip().upper().replace(' ', '_')
+                label = _LABEL_MAP.get(raw_label, parts[0].strip().title())
                 content = parts[1].strip() if len(parts) > 1 else ''
-                # Label en negrita, misma línea si el contenido es corto
                 pdf.set_font('Helvetica', 'B', 7.5)
                 pdf.set_text_color(50, 50, 50)
+                old_lm = pdf.l_margin
                 pdf.set_left_margin(10)
                 pdf.set_x(10)
+                pdf.cell(0, 5, clean(label + ':'), ln=True)
+                pdf.set_text_color(0, 0, 0)
                 if content:
-                    pdf.cell(0, 5, clean(label + ':'), ln=True)
-                    pdf.set_text_color(0, 0, 0)
                     pdf.set_font('Helvetica', '', 7.5)
                     pdf.set_left_margin(14)
                     pdf.set_x(14)
-                    pdf.multi_cell(0, 5, clean(content), align='L')
-                    pdf.set_left_margin(10)
-                else:
-                    pdf.cell(0, 5, clean(label + ':'), ln=True)
-                pdf.set_text_color(0, 0, 0)
+                    pdf.multi_cell(0, 5, clean(content), align='J')
+                pdf.set_left_margin(old_lm)
+            elif line.startswith('-'):
+                # item de lista dentro de [I] — sin guión, alineado a indent 14
+                pdf.body(line.lstrip('-* '), size=7.5, indent=14)
             else:
-                pdf.body(line, size=7.5)
+                pdf.body(line, size=7.5, indent=14)
     pdf.ln(2)
 
     # ── USDCLP ────────────────────────────────────────────────────────────────
@@ -771,29 +777,16 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     events = upcoming_next(5)
     if events:
         pdf.section('[CAL] CALENDARIO MACRO')
-        pdf.set_font('Helvetica', 'B', 7)
-        pdf.set_fill_color(230, 245, 238)
-        pdf.cell(25, 5.5, 'Fecha',       fill=True)
-        pdf.cell(10, 5.5, 'Prior.',      fill=True, align='C')
-        pdf.cell(75, 5.5, 'Evento',      fill=True)
-        pdf.cell(0,  5.5, 'Relevancia',  fill=True)
-        pdf.ln()
         PRIORITY_COLOR = {'HIGH': (200, 0, 0), 'MED': (180, 120, 0), 'LOW': (80, 80, 80)}
         for date, name, pri, desc in events:
             pc = PRIORITY_COLOR.get(pri, (80, 80, 80))
-            pdf.set_font('Helvetica', 'B', 7)
             pdf.set_x(10)
-            pdf.set_text_color(*pc)
-            pdf.cell(14, 5, clean(date))
-            pdf.cell(10, 5, f'[{pri}]')
-            pdf.set_text_color(0, 0, 0)
             pdf.set_font('Helvetica', 'B', 7)
-            pdf.cell(0, 5, clean(name), ln=True)
-            pdf.set_font('Helvetica', '', 6.5)
-            pdf.set_x(34)
-            pdf.set_text_color(80, 80, 80)
-            pdf.multi_cell(0, 4.5, clean(desc))
+            pdf.set_text_color(*pc)
+            pdf.cell(28, 5, clean(f'{date}  [{pri}]'))
             pdf.set_text_color(0, 0, 0)
+            pdf.set_font('Helvetica', '', 7)
+            pdf.cell(0, 5, clean(name), ln=True)
         pdf.ln(2)
 
     # ── WWCM ──────────────────────────────────────────────────────────────────
