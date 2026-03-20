@@ -14,7 +14,7 @@ data/yf_cache/
 data/closes_long.csv
 data/returns_daily.csv
 data/correlations_1y.csv
-data/cnn_fg_cache.json
+# data/cnn_fg_cache.json  ← en repo para fallback en GitHub Actions
 data/narrative_log.csv
 data/snapshot_today.json
 data/news/
