@@ -280,10 +280,11 @@ def format_macro_summary(closes):
         if len(s) < 2:
             continue
         price = _scalar(s)
-        r_w = _ret(_scalar(s, -5),  price) if len(s) >= 5  else 'N/D'
-        r_m = _ret(_scalar(s, -21), price) if len(s) >= 21 else 'N/D'
-        r_q = _ret(_scalar(s, 0),   price)
-        lines.append(f'{label:15s} {price:>9.2f}  W {r_w:>7}  M {r_m:>7}  Q {r_q:>7}')
+        r_1d = _ret(_scalar(s, -2),  price) if len(s) >= 2  else 'N/D'
+        r_w  = _ret(_scalar(s, -5),  price) if len(s) >= 5  else 'N/D'
+        r_m  = _ret(_scalar(s, -21), price) if len(s) >= 21 else 'N/D'
+        r_q  = _ret(_scalar(s, 0),   price)
+        lines.append(f'{label:15s} {price:>9.2f}  1D {r_1d:>7}  W {r_w:>7}  M {r_m:>7}  Q {r_q:>7}')
     return '\n'.join(lines)
 
 def format_fred_summary(fred):
@@ -342,6 +343,10 @@ def build_interpretation(closes, fred, cnn, btc, news, tensions):
 y producir una lectura base que sera usada para generar todas las secciones de un reporte financiero \
 de distribucion publica. Es critico que la causa raiz este anclada en datos y noticias concretas.
 
+REGLA OBLIGATORIA: cada vez que menciones una variacion porcentual, DEBES especificar el horizonte \
+temporal correspondiente entre parentesis: (1D), (W=5d), (M=21d) o (Q=63d). Ejemplo correcto: \
+"Oil +47.1% (M=21d)". Ejemplo incorrecto: "Oil subio 47%".
+
 DATOS DE MERCADO — {TODAY}
 
 [ACTIVOS] Precio | W (5d) | M (21d) | Q (63d):
@@ -388,6 +393,8 @@ def build_tldr(interp, cnn, btc, closes, fred):
 
 {interp}
 
+REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+
 Genera un TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ".
 Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante del dia con numero, \
 (3) tension o divergencia mas importante, (4) que vigilar esta semana.
@@ -410,6 +417,8 @@ def build_3m_view(interp, closes, fred):
 
 {interp}
 
+REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+
 Genera un 3M VIEW (perspectiva proximos 3 meses) con EXACTAMENTE 5 bullets en espanol, \
 comenzando cada uno con "- ".
 Datos adicionales: Oil M {oil_m} | S&P Q {sp_q} | HY spread {hy} | 10Y {dgs10}% | Inflacion impl 5Y {t5yie}%
@@ -431,6 +440,8 @@ def build_wwcm(interp, tensions):
     prompt = f"""Usando esta interpretacion del mercado como base:
 
 {interp}
+
+REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
 
 Tensiones detectadas automaticamente:
 {tens_txt}
@@ -459,6 +470,8 @@ def build_usdclp_comment(interp, closes):
 
 {interp}
 
+REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+
 Genera un comentario sobre el USDCLP. 2-3 oraciones.
 Datos: USDCLP {clp_now} | W {clp_w} | M {clp_m} | Q {clp_q} | Cobre Q {cu_q} | DXY Q {dxy_q}
 Incluye: nivel actual en contexto, presiones dominantes (cobre/DXY/EM), direccion esperada proximas semanas.
@@ -471,8 +484,9 @@ En espanol, directo al punto, sin titulos."""
 class PDF(FPDF):
     def __init__(self):
         super().__init__()
-        self.set_auto_page_break(auto=True, margin=12)
+        self.set_auto_page_break(auto=True, margin=14)
         self.set_margins(8, 10, 8)
+        self._page_h = 297  # A4 mm
 
     def header(self):
         pass
@@ -484,10 +498,13 @@ class PDF(FPDF):
         now = datetime.now().strftime('%Y-%m-%d %H:%M')
         self.cell(0, 4, clean(
             f'Generado: {now}  |  Groq llama-3.3-70b-versatile  |  '
-            f'yfinance + FRED + RSS  |  Pipeline 3'), align='C')
+            f'yfinance + FRED + RSS'), align='C')
 
-    def section(self, title, color=(30, 60, 120)):
-        self.set_fill_color(*color)
+    def section(self, title, min_space=40, color=None):
+        # Si no queda suficiente espacio, saltar a página nueva
+        if self.get_y() + min_space > self._page_h - 14:
+            self.add_page()
+        self.set_fill_color(70, 70, 78)   # gris oscuro uniforme
         self.set_text_color(255, 255, 255)
         self.set_font('Helvetica', 'B', 8)
         self.cell(0, 6, clean(f'  {title}'), fill=True, ln=True)
@@ -514,8 +531,23 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf = PDF()
     pdf.add_page()
 
+    # ── Título ────────────────────────────────────────────────────────────────
+    date_fmt = datetime.strptime(TODAY, '%Y-%m-%d').strftime('%d/%m/%Y')
+    pdf.set_font('Helvetica', 'B', 16)
+    pdf.set_text_color(30, 30, 40)
+    pdf.cell(0, 10, clean(f'Vista Macro  {date_fmt}'), ln=True, align='L')
+    pdf.set_font('Helvetica', '', 8)
+    pdf.set_text_color(130, 130, 140)
+    pdf.cell(0, 5, clean('The Global Compounder  |  Macro Brief  |  Powered by Groq llama-3.3-70b'), ln=True)
+    pdf.ln(4)
+    pdf.set_draw_color(200, 200, 210)
+    pdf.set_line_width(0.3)
+    pdf.line(8, pdf.get_y(), 202, pdf.get_y())
+    pdf.ln(4)
+    pdf.set_text_color(0, 0, 0)
+
     # ── TL;DR ─────────────────────────────────────────────────────────────────
-    pdf.section('[TL;DR] RESUMEN EJECUTIVO', color=(20, 20, 60))
+    pdf.section('[TL;DR] RESUMEN EJECUTIVO')
     if tldr:
         for line in tldr.split('\n'):
             if line.strip():
@@ -523,7 +555,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(3)
 
     # ── Sentimiento ───────────────────────────────────────────────────────────
-    pdf.section('[S] SENTIMIENTO', color=(80, 40, 100))
+    pdf.section('[S] SENTIMIENTO')
     cnn_ch = cnn.get('change', None)
     ch_txt = f'  (cambio: {cnn_ch:+.1f})' if cnn_ch else ''
     pdf.body(
@@ -532,14 +564,15 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(2)
 
     # ── Resumen de activos ────────────────────────────────────────────────────
-    pdf.section('[M] RESUMEN DE ACTIVOS', color=(40, 80, 160))
+    pdf.section('[M] RESUMEN DE ACTIVOS')
     pdf.set_font('Helvetica', 'B', 7)
     pdf.set_fill_color(230, 235, 245)
-    pdf.cell(38, 5.5, 'Activo',  fill=True)
-    pdf.cell(22, 5.5, 'Precio',  fill=True, align='R')
-    pdf.cell(18, 5.5, 'W (5d)',  fill=True, align='R')
-    pdf.cell(18, 5.5, 'M (21d)', fill=True, align='R')
-    pdf.cell(18, 5.5, 'Q (63d)', fill=True, align='R')
+    pdf.cell(36, 5.5, 'Activo',  fill=True)
+    pdf.cell(20, 5.5, 'Precio',  fill=True, align='R')
+    pdf.cell(16, 5.5, '1D',      fill=True, align='R')
+    pdf.cell(16, 5.5, 'W (5d)',  fill=True, align='R')
+    pdf.cell(16, 5.5, 'M (21d)', fill=True, align='R')
+    pdf.cell(16, 5.5, 'Q (63d)', fill=True, align='R')
     pdf.ln()
 
     def ret_color(r):
@@ -556,29 +589,30 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         if len(s) < 2:
             continue
         price = _scalar(s)
-        r_w = _ret(_scalar(s, -5),  price) if len(s) >= 5  else 'N/D'
-        r_m = _ret(_scalar(s, -21), price) if len(s) >= 21 else 'N/D'
-        r_q = _ret(_scalar(s, 0),   price)
+        r_1d = _ret(_scalar(s, -2),  price) if len(s) >= 2  else 'N/D'
+        r_w  = _ret(_scalar(s, -5),  price) if len(s) >= 5  else 'N/D'
+        r_m  = _ret(_scalar(s, -21), price) if len(s) >= 21 else 'N/D'
+        r_q  = _ret(_scalar(s, 0),   price)
         pdf.set_font('Helvetica', '', 7)
         pdf.set_fill_color(248, 248, 252)
-        pdf.cell(38, 5, clean(label), fill=True)
-        pdf.cell(22, 5, f'{price:.2f}', fill=True, align='R')
-        for r in [r_w, r_m, r_q]:
+        pdf.cell(36, 5, clean(label), fill=True)
+        pdf.cell(20, 5, f'{price:.2f}', fill=True, align='R')
+        for r in [r_1d, r_w, r_m, r_q]:
             pdf.set_text_color(*ret_color(r))
-            pdf.cell(18, 5, r, fill=True, align='R')
+            pdf.cell(16, 5, r, fill=True, align='R')
             pdf.set_text_color(0, 0, 0)
         pdf.ln()
     pdf.ln(2)
 
     # ── Tensiones ─────────────────────────────────────────────────────────────
     if tensions:
-        pdf.section('[!] TENSIONES DETECTADAS', color=(160, 50, 0))
+        pdf.section('[!] TENSIONES DETECTADAS')
         for t in tensions:
             pdf.bullet(t, size=7.5)
         pdf.ln(2)
 
     # ── Noticias ──────────────────────────────────────────────────────────────
-    pdf.section('[N] NOTICIAS', color=(100, 60, 20))
+    pdf.section('[N] NOTICIAS')
     for a in news[:8]:
         pdf.set_font('Helvetica', 'B', 6.5)
         pdf.set_x(10)
@@ -591,7 +625,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(1)
 
     # ── Interpretacion base ───────────────────────────────────────────────────
-    pdf.section('[I] INTERPRETACION BASE', color=(80, 40, 120))
+    pdf.section('[I] INTERPRETACION BASE')
     if interp:
         for line in interp.split('\n'):
             line = line.strip()
@@ -617,39 +651,76 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     # ── USDCLP ────────────────────────────────────────────────────────────────
     clp = closes['USDCLP=X'].dropna() if 'USDCLP=X' in closes.columns else None
     cu  = closes['HG=F'].dropna()     if 'HG=F'     in closes.columns else None
-    pdf.section('[CLP] USD/CLP', color=(20, 100, 130))
+    dxy = closes['DX-Y.NYB'].dropna() if 'DX-Y.NYB' in closes.columns else None
+    oil = closes['CL=F'].dropna()     if 'CL=F'     in closes.columns else None
+    vix = closes['^VIX'].dropna()     if '^VIX'     in closes.columns else None
+    sp  = closes['^GSPC'].dropna()    if '^GSPC'    in closes.columns else None
+
+    pdf.section('[CLP]  USDCLP / PESO CHILENO')
+
+    # Headline: precio + 1D + YTD
+    if clp is not None and len(clp) >= 2:
+        clp_val = _scalar(clp)
+        clp_1d  = _ret(_scalar(clp, -2), clp_val) if len(clp) >= 2 else 'N/D'
+        clp_ytd = _ret(next((float(clp.loc[clp.index >= f'{datetime.today().year}-01-01'].iloc[0])
+                              for _ in [1] if len(clp.loc[clp.index >= f'{datetime.today().year}-01-01']) > 0),
+                             float(clp.iloc[0])), clp_val)
+        pdf.set_font('Helvetica', 'B', 8)
+        pdf.set_x(10)
+        pdf.cell(30, 6, clean(f'USDCLP: {clp_val:.0f}'))
+        pdf.set_text_color(*ret_color(clp_1d))
+        pdf.cell(28, 6, clean(f'1D: {clp_1d}'))
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(28, 6, clean(f'YTD: {clp_ytd}'))
+        pdf.ln(7)
+
+    # Tabla de factores
+    fac_w = [38, 26, 22, 36]
     pdf.set_font('Helvetica', 'B', 7)
-    pdf.set_fill_color(220, 240, 245)
-    pdf.cell(38, 5.5, 'Activo',  fill=True)
-    pdf.cell(22, 5.5, 'Precio',  fill=True, align='R')
-    pdf.cell(18, 5.5, 'W (5d)',  fill=True, align='R')
-    pdf.cell(18, 5.5, 'M (21d)', fill=True, align='R')
-    pdf.cell(18, 5.5, 'Q (63d)', fill=True, align='R')
+    pdf.set_fill_color(220, 230, 245)
+    for h, w in zip(['Factor', 'Valor', 'YTD%', 'Efecto en CLP'], fac_w):
+        pdf.cell(w, 5.5, h, fill=True, align='C' if h != 'Factor' else 'L')
     pdf.ln()
-    for label, s in [('USD/CLP', clp), ('Cobre (HG=F)', cu)]:
-        if s is not None and len(s) >= 2:
-            price = _scalar(s)
-            r_w = _ret(_scalar(s, -5),  price) if len(s) >= 5  else 'N/D'
-            r_m = _ret(_scalar(s, -21), price) if len(s) >= 21 else 'N/D'
-            r_q = _ret(_scalar(s, 0),   price)
-            pdf.set_font('Helvetica', '', 7)
-            pdf.set_fill_color(245, 250, 252)
-            pdf.cell(38, 5, clean(label), fill=True)
-            pdf.cell(22, 5, f'{price:.2f}', fill=True, align='R')
-            for r in [r_w, r_m, r_q]:
-                pdf.set_text_color(*ret_color(r))
-                pdf.cell(18, 5, r, fill=True, align='R')
-                pdf.set_text_color(0, 0, 0)
-            pdf.ln()
-    pdf.ln(2)
+
+    def ytd(s):
+        try:
+            p0 = float(s.loc[s.index >= f'{datetime.today().year}-01-01'].iloc[0])
+            return f'{(float(s.iloc[-1]) / p0 - 1) * 100:+.1f}%'
+        except Exception:
+            return 'N/D'
+
+    factors = []
+    if cu  is not None: factors.append(('Cobre HG=F', f'${_scalar(cu):.3f}/lb', ytd(cu),  ('alto = CLP +', True)))
+    if dxy is not None: factors.append(('DXY',        f'{_scalar(dxy):.1f}',    ytd(dxy), ('alto = CLP -', False)))
+    if oil is not None: factors.append(('Oil WTI',    f'${_scalar(oil):.1f}',   ytd(oil), ('alto = CLP -', False)))
+    if vix is not None: factors.append(('VIX',        f'{_scalar(vix):.1f}',    ytd(vix), ('alto = CLP -', False)))
+    if sp  is not None: factors.append(('S&P 500',    'YTD',                    ytd(sp),  ('sube = CLP +', True)))
+    ff = fred.get('FEDFUNDS', {}).get('value')
+    if ff: factors.append(('Fed Funds', f'{ff:.2f}%', '---', ('alto = CLP -', False)))
+
+    for name, val, ytd_v, (eff, positive) in factors:
+        pdf.set_font('Helvetica', '', 7)
+        pdf.set_fill_color(248, 250, 254)
+        pdf.cell(fac_w[0], 5, clean(name), fill=True)
+        pdf.cell(fac_w[1], 5, clean(val),  fill=True, align='R')
+        pdf.set_text_color(*ret_color(ytd_v))
+        pdf.cell(fac_w[2], 5, clean(ytd_v), fill=True, align='R')
+        pdf.set_text_color(0, 130, 0) if positive else pdf.set_text_color(160, 0, 0)
+        pdf.cell(fac_w[3], 5, clean(eff), fill=True, align='C')
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln()
+    pdf.ln(3)
+
     if usdclp_comment:
-        pdf.body(usdclp_comment, size=7.5)
+        pdf.set_font('Helvetica', 'I', 7.5)
+        pdf.set_x(10)
+        pdf.multi_cell(0, 5, clean(usdclp_comment))
     pdf.ln(3)
 
     # ── Upcoming events ───────────────────────────────────────────────────────
     events = upcoming_next(5)
     if events:
-        pdf.section('[CAL] CALENDARIO MACRO', color=(40, 100, 80))
+        pdf.section('[CAL] CALENDARIO MACRO')
         pdf.set_font('Helvetica', 'B', 7)
         pdf.set_fill_color(230, 245, 238)
         pdf.cell(25, 5.5, 'Fecha',       fill=True)
@@ -676,7 +747,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         pdf.ln(2)
 
     # ── WWCM ──────────────────────────────────────────────────────────────────
-    pdf.section('[W] WHAT WOULD CHANGE MY MIND', color=(130, 70, 20))
+    pdf.section('[W] WHAT WOULD CHANGE MY MIND')
     if wwcm:
         for line in wwcm.split('\n'):
             if line.strip():
@@ -684,7 +755,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(3)
 
     # ── 3M View ───────────────────────────────────────────────────────────────
-    pdf.section('[3M] 3M VIEW — BASED ON CURRENT BRIEF', color=(60, 30, 100))
+    pdf.section('[3M] 3M VIEW — BASED ON CURRENT BRIEF')
     if v3:
         for line in v3.split('\n'):
             if line.strip():
