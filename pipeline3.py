@@ -397,7 +397,7 @@ REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W
 CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas.
 
 Genera un TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ".
-Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante del dia con numero, \
+Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante HOY usando SOLO el retorno (1D) — nunca uses W/M/Q para describir lo que paso hoy, \
 (3) tension o divergencia mas importante, (4) que vigilar esta semana.
 Datos adicionales: VIX {vix} | 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 (subir=menos miedo, bajar=mas miedo) | BTC F&G {btc.get('score','N/D')}/100 (misma escala)
 Sin titulos, sin introduccion, solo los 4 bullets."""
