@@ -586,9 +586,11 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.section('[TL;DR] RESUMEN EJECUTIVO')
     if tldr:
         for line in tldr.split('\n'):
-            if line.strip():
-                pdf.bullet(line)
-    pdf.ln(3)
+            line = line.strip().lstrip('-* ')
+            if line:
+                pdf.body(line, size=8)
+                pdf.ln(1)
+    pdf.ln(2)
 
     # ── Sentimiento ───────────────────────────────────────────────────────────
     pdf.section('[S] SENTIMIENTO')
@@ -661,7 +663,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(1)
 
     # ── Interpretacion base ───────────────────────────────────────────────────
-    pdf.section('[I] INTERPRETACION BASE', min_space=50)
+    pdf.section('[I] INTERPRETACION BASE', min_space=90)
     if interp:
         for line in interp.split('\n'):
             line = line.strip()
@@ -792,20 +794,24 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         pdf.ln(2)
 
     # ── WWCM ──────────────────────────────────────────────────────────────────
-    pdf.section('[W] WHAT WOULD CHANGE MY MIND')
+    pdf.section('[W] WHAT WOULD CHANGE MY MIND', min_space=70)
     if wwcm:
         for line in wwcm.split('\n'):
-            if line.strip():
-                pdf.bullet(line)
-    pdf.ln(3)
+            line = line.strip().lstrip('-* ')
+            if line:
+                pdf.body(line, size=8)
+                pdf.ln(1)
+    pdf.ln(2)
 
     # ── 3M View ───────────────────────────────────────────────────────────────
-    pdf.section('[3M] 3M VIEW — BASED ON CURRENT BRIEF')
+    pdf.section('[3M] 3M VIEW — BASED ON CURRENT BRIEF', min_space=70)
     if v3:
         for line in v3.split('\n'):
-            if line.strip():
-                pdf.bullet(line)
-    pdf.ln(3)
+            line = line.strip().lstrip('-* ')
+            if line:
+                pdf.body(line, size=8)
+                pdf.ln(1)
+    pdf.ln(2)
 
     return pdf
 
