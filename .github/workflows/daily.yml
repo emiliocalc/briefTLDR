@@ -1,0 +1,45 @@
+name: Daily Macro Brief
+
+on:
+  schedule:
+    - cron: '0 14 * * 1-5'   # Lunes a viernes 14:00 UTC (11:00 AM Chile)
+  workflow_dispatch:           # Permite correrlo manualmente desde GitHub
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install yfinance fpdf2 feedparser requests pandas
+
+      - name: Download FRED data
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: python download_macro_fred.py
+
+      - name: Run Pipeline 3
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: llama-3.3-70b-versatile
+        run: python pipeline3.py
+
+      - name: Commit and push brief
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/daily_summaries/*_p3.pdf data/daily_summaries/*_p3.md
+          git diff --cached --quiet || git commit -m "brief $(date +%Y-%m-%d)"
+          git push
