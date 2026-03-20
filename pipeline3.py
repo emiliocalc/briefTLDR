@@ -72,15 +72,27 @@ MACRO_TICKERS = {
 }
 
 NEWS_FEEDS = [
-    ('CNBC',        'https://www.cnbc.com/id/100003114/device/rss/rss.html'),
-    ('MarketWatch', 'https://feeds.content.dowjones.io/public/rss/mw_marketpulse'),
-    ('Reuters',     'https://feeds.reuters.com/reuters/businessNews'),
+    # Mercados
+    ('CNBC',         'https://www.cnbc.com/id/100003114/device/rss/rss.html'),
+    ('MarketWatch',  'https://feeds.content.dowjones.io/public/rss/mw_marketpulse'),
+    ('Reuters Biz',  'https://feeds.reuters.com/reuters/businessNews'),
+    # Geopolítica
+    ('Reuters World','https://feeds.reuters.com/Reuters/worldNews'),
+    ('BBC World',    'https://feeds.bbci.co.uk/news/world/rss.xml'),
+    ('Al Jazeera',   'https://www.aljazeera.com/xml/rss/all.xml'),
 ]
 NEWS_KEYWORDS = [
+    # Macro / Fed
     'fed', 'federal reserve', 'fomc', 'powell', 'rate', 'inflation', 'cpi', 'pce',
-    'recession', 'iran', 'hormuz', 'oil', 'crude', 'opec', 'bitcoin', 'btc',
-    'gold', 'treasury', 'yield', 'vix', "s&p", 'nasdaq', 'market', 'stocks',
-    'tariff', 'trade', 'china', 'dollar', 'dxy', 'equity', 'metals',
+    'recession', 'treasury', 'yield', 'dollar', 'dxy',
+    # Mercados
+    'oil', 'crude', 'opec', 'gold', 'vix', "s&p", 'nasdaq', 'market', 'stocks',
+    'bitcoin', 'btc', 'equity', 'metals', 'tariff', 'trade',
+    # Geopolítica
+    'iran', 'hormuz', 'strait', 'middle east', 'israel', 'gaza', 'hezbollah',
+    'russia', 'ukraine', 'nato', 'taiwan', 'china sea', 'sanctions', 'embargo',
+    'military', 'attack', 'strike', 'war', 'conflict', 'escalat', 'ceasefire',
+    'opec', 'saudi', 'gulf', 'pipeline', 'energy crisis',
 ]
 
 UPCOMING_EVENTS = [
