@@ -417,7 +417,8 @@ def build_3m_view(interp, closes, fred):
 
 {interp}
 
-REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+REGLA para datos historicos: cada variacion porcentual pasada debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+REGLA para proyecciones: NO uses etiquetas de horizonte. Usa lenguaje temporal claro: "en 3 meses", "hacia junio", "en el proximo trimestre".
 
 Genera un 3M VIEW (perspectiva proximos 3 meses) con EXACTAMENTE 5 bullets en espanol, \
 comenzando cada uno con "- ".
