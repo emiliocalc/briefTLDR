@@ -1,0 +1,5 @@
+yfinance
+fpdf2
+feedparser
+requests
+pandas
