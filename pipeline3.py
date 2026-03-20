@@ -536,16 +536,45 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     date_fmt = datetime.strptime(TODAY, '%Y-%m-%d').strftime('%d/%m/%Y')
     pdf.set_font('Helvetica', 'B', 16)
     pdf.set_text_color(30, 30, 40)
-    pdf.cell(0, 10, clean(f'Vista Macro  {date_fmt}'), ln=True, align='L')
+    pdf.cell(0, 10, clean('The Global Compounder'), ln=True, align='L')
     pdf.set_font('Helvetica', '', 8)
     pdf.set_text_color(130, 130, 140)
-    pdf.cell(0, 5, clean('The Global Compounder  |  Macro Brief  |  Powered by Groq llama-3.3-70b'), ln=True)
+    pdf.cell(0, 5, clean(f'Macro Brief  |  {date_fmt}  |  Powered by Groq llama-3.3-70b'), ln=True)
     pdf.ln(4)
     pdf.set_draw_color(200, 200, 210)
     pdf.set_line_width(0.3)
     pdf.line(8, pdf.get_y(), 202, pdf.get_y())
     pdf.ln(4)
     pdf.set_text_color(0, 0, 0)
+
+    # ── Disclaimer ────────────────────────────────────────────────────────────
+    pdf.set_fill_color(245, 245, 230)
+    pdf.set_draw_color(200, 190, 130)
+    pdf.set_line_width(0.3)
+    pdf.set_font('Helvetica', 'I', 6.5)
+    pdf.set_text_color(100, 90, 40)
+    yesterday = (datetime.strptime(TODAY, '%Y-%m-%d')
+                 .replace(hour=0, minute=0, second=0))
+    import calendar as _cal
+    # retroceder al último día hábil
+    wd = yesterday.weekday()  # 0=lun … 6=dom
+    # si hoy es lunes el cierre es el viernes anterior
+    delta = 3 if wd == 0 else 1
+    from datetime import timedelta
+    close_date = (yesterday - timedelta(days=delta)).strftime('%d/%m/%Y')
+    disclaimer_text = (
+        f'Todos los precios y retornos corresponden al cierre de mercado del {close_date}. '
+        f'La interpretacion de los datos es generada automaticamente por un modelo de inteligencia artificial (Groq llama-3.3-70b) que puede cometer errores. '
+        f'Este reporte es de caracter informativo y educativo. '
+        f'No constituye asesoramiento financiero ni una recomendacion de inversion. '
+        f'The Global Compounder no se responsabiliza por decisiones tomadas en base a este contenido.'
+    )
+    x0 = pdf.get_x()
+    pdf.set_x(8)
+    pdf.multi_cell(0, 4.5, clean(disclaimer_text), border=1, fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.ln(3)
 
     # ── TL;DR ─────────────────────────────────────────────────────────────────
     pdf.section('[TL;DR] RESUMEN EJECUTIVO')
