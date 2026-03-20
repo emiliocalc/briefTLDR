@@ -356,8 +356,8 @@ DATOS DE MERCADO — {TODAY}
 {fred_txt}
 Crecimiento: {summarize_growth(fred)} | Liquidez: {summarize_liquidity(fred)} | Credito: {summarize_credit(fred)}
 
-[SENTIMIENTO] (escala 0-100: 0=Extreme Fear, 100=Extreme Greed — menor numero = mas miedo):
-CNN Fear & Greed: {cnn_s}/100 ({cnn_r}){f', cambio vs ayer: {cnn_ch:+.1f}' if cnn_ch else ''}
+[SENTIMIENTO] (escala 0-100: 0=Panico total, 50=Neutro, 100=Euforia maxima — subir = menos miedo, bajar = mas miedo):
+CNN Fear & Greed: {cnn_s}/100 ({cnn_r}) — ZONA: {"panico" if (cnn_s or 50) < 25 else "miedo" if (cnn_s or 50) < 45 else "neutro" if (cnn_s or 50) < 55 else "codicia"}{f', cambio vs ayer: {cnn_ch:+.1f}' if cnn_ch else ''}
 BTC Fear & Greed: {btc_s}/100 ({btc_r})
 
 [TENSIONES DETECTADAS]:
@@ -398,7 +398,7 @@ REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W
 Genera un TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ".
 Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante del dia con numero, \
 (3) tension o divergencia mas importante, (4) que vigilar esta semana.
-Datos adicionales: VIX {vix} | 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 (0=Extreme Fear) | BTC F&G {btc.get('score','N/D')}/100 (0=Extreme Fear)
+Datos adicionales: VIX {vix} | 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 (subir=menos miedo, bajar=mas miedo) | BTC F&G {btc.get('score','N/D')}/100 (misma escala)
 Sin titulos, sin introduccion, solo los 4 bullets."""
 
     return _groq_call(prompt, max_tokens=400)
