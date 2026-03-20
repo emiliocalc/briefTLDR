@@ -501,7 +501,7 @@ class PDF(FPDF):
             f'Generado: {now}  |  Groq llama-3.3-70b-versatile  |  '
             f'yfinance + FRED + RSS'), align='C')
 
-    def section(self, title, min_space=40, color=None):
+    def section(self, title, min_space=55, color=None):
         # Si no queda suficiente espacio, saltar a página nueva
         if self.get_y() + min_space > self._page_h - 14:
             self.add_page()
@@ -512,19 +512,25 @@ class PDF(FPDF):
         self.set_text_color(0, 0, 0)
         self.ln(1)
 
-    def body(self, text, size=8):
+    def body(self, text, size=8, indent=10):
         self.set_font('Helvetica', '', size)
-        self.set_x(10)
-        self.multi_cell(0, 5, clean(text))
+        old_lm = self.l_margin
+        self.set_left_margin(indent)
+        self.set_x(indent)
+        self.multi_cell(0, 5, clean(text), align='L')
+        self.set_left_margin(old_lm)
 
     def bullet(self, text, size=8):
         text = text.strip().lstrip('-* ')
         if not text:
             return
         self.set_font('Helvetica', '', size)
+        old_lm = self.l_margin
+        self.set_left_margin(15)
         self.set_x(8)
-        self.cell(5, 5.2, clean('-'))
-        self.multi_cell(0, 5.2, clean(text))
+        self.cell(7, 5.2, clean('-'))
+        self.multi_cell(0, 5.2, clean(text), align='L')
+        self.set_left_margin(old_lm)
 
 
 def build_pdf(closes, fred, cnn, btc, news, tensions,
@@ -655,25 +661,34 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(1)
 
     # ── Interpretacion base ───────────────────────────────────────────────────
-    pdf.section('[I] INTERPRETACION BASE')
+    pdf.section('[I] INTERPRETACION BASE', min_space=50)
     if interp:
         for line in interp.split('\n'):
             line = line.strip()
             if not line:
                 pdf.ln(1)
             elif line.startswith('-'):
-                pdf.bullet(line)
+                pdf.bullet(line, size=7.5)
             elif ':' in line and line.split(':')[0].replace('_', ' ').isupper():
                 parts = line.split(':', 1)
+                label = parts[0].strip()
+                content = parts[1].strip() if len(parts) > 1 else ''
+                # Label en negrita, misma línea si el contenido es corto
                 pdf.set_font('Helvetica', 'B', 7.5)
+                pdf.set_text_color(50, 50, 50)
+                pdf.set_left_margin(10)
                 pdf.set_x(10)
-                pdf.set_text_color(60, 60, 60)
-                pdf.multi_cell(0, 5, clean(parts[0] + ':'))
-                pdf.set_text_color(0, 0, 0)
-                if len(parts) > 1 and parts[1].strip():
+                if content:
+                    pdf.cell(0, 5, clean(label + ':'), ln=True)
+                    pdf.set_text_color(0, 0, 0)
                     pdf.set_font('Helvetica', '', 7.5)
+                    pdf.set_left_margin(14)
                     pdf.set_x(14)
-                    pdf.multi_cell(0, 5, clean(parts[1].strip()))
+                    pdf.multi_cell(0, 5, clean(content), align='L')
+                    pdf.set_left_margin(10)
+                else:
+                    pdf.cell(0, 5, clean(label + ':'), ln=True)
+                pdf.set_text_color(0, 0, 0)
             else:
                 pdf.body(line, size=7.5)
     pdf.ln(2)
