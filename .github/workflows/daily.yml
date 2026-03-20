@@ -36,10 +36,33 @@ jobs:
           GROQ_MODEL: llama-3.3-70b-versatile
         run: python pipeline3.py
 
+      - name: Update briefs.json
+        run: |
+          python - <<'EOF'
+          import json, os, re
+          from pathlib import Path
+
+          summ = Path("data/daily_summaries")
+          pdfs = sorted(summ.glob("*_p3.pdf"), reverse=True)
+          briefs = []
+          for p in pdfs:
+              m = re.match(r"(\d{4}-\d{2}-\d{2})_p3\.pdf", p.name)
+              if m:
+                  date = m.group(1)
+                  briefs.append({
+                      "date": date,
+                      "pdf":  f"data/daily_summaries/{date}_p3.pdf",
+                      "md":   f"data/daily_summaries/{date}_p3.md"
+                  })
+          with open("briefs.json", "w") as f:
+              json.dump(briefs, f, indent=2)
+          print(f"briefs.json updated with {len(briefs)} entries")
+          EOF
+
       - name: Commit and push brief
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/daily_summaries/*_p3.pdf data/daily_summaries/*_p3.md
+          git add data/daily_summaries/*_p3.pdf data/daily_summaries/*_p3.md briefs.json
           git diff --cached --quiet || git commit -m "brief $(date +%Y-%m-%d)"
           git push
