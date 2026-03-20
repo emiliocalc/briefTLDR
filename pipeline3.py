@@ -351,9 +351,9 @@ DATOS DE MERCADO — {TODAY}
 {fred_txt}
 Crecimiento: {summarize_growth(fred)} | Liquidez: {summarize_liquidity(fred)} | Credito: {summarize_credit(fred)}
 
-[SENTIMIENTO]:
-CNN Fear & Greed: {cnn_s} ({cnn_r}){f', cambio vs ayer: {cnn_ch:+.1f}' if cnn_ch else ''}
-BTC Fear & Greed: {btc_s} ({btc_r})
+[SENTIMIENTO] (escala 0-100: 0=Extreme Fear, 100=Extreme Greed — menor numero = mas miedo):
+CNN Fear & Greed: {cnn_s}/100 ({cnn_r}){f', cambio vs ayer: {cnn_ch:+.1f}' if cnn_ch else ''}
+BTC Fear & Greed: {btc_s}/100 ({btc_r})
 
 [TENSIONES DETECTADAS]:
 {tens_txt}
@@ -391,7 +391,7 @@ def build_tldr(interp, cnn, btc, closes, fred):
 Genera un TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ".
 Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante del dia con numero, \
 (3) tension o divergencia mas importante, (4) que vigilar esta semana.
-Datos adicionales: VIX {vix} | 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')} | BTC F&G {btc.get('score','N/D')}
+Datos adicionales: VIX {vix} | 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 (0=Extreme Fear) | BTC F&G {btc.get('score','N/D')}/100 (0=Extreme Fear)
 Sin titulos, sin introduccion, solo los 4 bullets."""
 
     return _groq_call(prompt, max_tokens=400)
@@ -475,10 +475,7 @@ class PDF(FPDF):
         self.set_margins(8, 10, 8)
 
     def header(self):
-        self.set_font('Helvetica', 'B', 7)
-        self.set_text_color(120, 120, 120)
-        self.cell(0, 5, clean(f'THE GLOBAL COMPOUNDER — MACRO BRIEF | {TODAY}'), align='R')
-        self.ln(4)
+        pass
 
     def footer(self):
         self.set_y(-10)
