@@ -512,12 +512,12 @@ class PDF(FPDF):
         self.set_text_color(0, 0, 0)
         self.ln(1)
 
-    def body(self, text, size=8, indent=10):
+    def body(self, text, size=8, indent=8):
         self.set_font('Helvetica', '', size)
         old_lm = self.l_margin
         self.set_left_margin(indent)
         self.set_x(indent)
-        self.multi_cell(0, 5, clean(text), align='L')
+        self.multi_cell(0, 5, clean(text), align='J')
         self.set_left_margin(old_lm)
 
     def bullet(self, text, size=8):
@@ -646,19 +646,22 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     if tensions:
         pdf.section('[!] TENSIONES DETECTADAS')
         for t in tensions:
-            pdf.bullet(t, size=7.5)
-        pdf.ln(2)
+            pdf.body(t, size=7.5)
+            pdf.ln(1)
+        pdf.ln(1)
 
     # ── Noticias ──────────────────────────────────────────────────────────────
     pdf.section('[N] NOTICIAS')
     for a in news[:8]:
         pdf.set_font('Helvetica', 'B', 6.5)
-        pdf.set_x(10)
-        pdf.multi_cell(0, 4.5, clean(f'[{a["source"]}] {a["title"]}'))
+        pdf.set_left_margin(8)
+        pdf.set_x(8)
+        pdf.multi_cell(0, 4.5, clean(f'[{a["source"]}] {a["title"]}'), align='L')
         if a.get('summary'):
             pdf.set_font('Helvetica', '', 6)
-            pdf.set_x(14)
-            pdf.multi_cell(0, 4, clean(a['summary'][:160]))
+            pdf.set_left_margin(8)
+            pdf.set_x(8)
+            pdf.multi_cell(0, 4, clean(a['summary'][:160]), align='J')
         pdf.ln(1)
     pdf.ln(1)
 
