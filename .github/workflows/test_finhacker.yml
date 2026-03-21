@@ -1,0 +1,12 @@
+name: Test finhacker endpoint
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test finhacker.cz F&G endpoint
+        run: |
+          curl -s "https://www.finhacker.cz/wp-content/data/fng-live.json"
