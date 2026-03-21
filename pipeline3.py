@@ -329,6 +329,46 @@ def upcoming_next(n=4):
             for d, name, pri, desc in UPCOMING_EVENTS if d >= TODAY][:n]
 
 
+REGLAS_GLOBALES = """
+REGLAS DE CONSISTENCIA (OBLIGATORIAS):
+
+1. NIVELES Y PROYECCIONES:
+   - Toda proyeccion de precio DEBE ser consistente con el nivel actual provisto en los datos.
+   - Ejemplo: si S&P = 6500, una caida de -10% implica ~5850. Nunca uses niveles como 3800.
+   - PROHIBIDO usar niveles historicos o default del modelo de entrenamiento.
+
+2. DIRECCION LOGICA:
+   - Si dices "sube X%", el nivel futuro DEBE ser mayor al actual.
+   - Si dices "cae X%", el nivel futuro DEBE ser menor al actual.
+   - Si hay contradiccion → NO escribir ese escenario.
+
+3. COHERENCIA INTERNA:
+   - No puedes contradecir datos actuales.
+   - Ejemplo: si Oil = 98, no puedes decir "sube a 80" (80 < 98 = caida, no subida).
+   - Si un umbral ya fue superado → NO usarlo como condicion futura.
+
+4. ESCALA CORRECTA:
+   - Usa SIEMPRE los niveles provistos en los datos.
+   - PROHIBIDO mezclar escalas (ej: oro en 4500 vs 1800).
+
+5. SI NO ESTAS SEGURO:
+   - Reduce precision en vez de inventar.
+   - Prefiere rangos ("caida adicional de 5-10%") en vez de niveles incorrectos.
+
+6. PROHIBIDO NARRATIVE BIAS:
+   - No fuerces una historia unica para explicar todo.
+   - Si hay multiples drivers, mencionalos o reduce la certeza.
+   - Usa lenguaje probabilistico cuando no hay evidencia clara: "probablemente", "consistente con", "sugiere".
+"""
+
+CHECK_FINAL = """
+CHECK FINAL (OBLIGATORIO ANTES DE RESPONDER):
+- Algún nivel es imposible dado el precio actual? → corrige.
+- Alguna direccion esta invertida? → corrige.
+- Algun escenario contradice otro? → corrige.
+- Algun numero parece de otro regimen historico? → elimina y recalcula.
+"""
+
 # ── groq ─────────────────────────────────────────────────────────────────────
 def _groq_call(prompt, max_tokens=800):
     api_key = os.environ.get('GROQ_API_KEY', '')
@@ -369,11 +409,19 @@ def build_interpretation(closes, fred, cnn, btc, news, tensions):
     prompt = f"""Eres un analista macro senior. Tu tarea es INTERPRETAR los datos del mercado de hoy \
 y producir una lectura base que sera usada para generar todas las secciones de un reporte financiero \
 de distribucion publica. Es critico que la causa raiz este anclada en datos y noticias concretas.
-
+{REGLAS_GLOBALES}
 REGLA OBLIGATORIA: cada vez que menciones una variacion porcentual, DEBES especificar el horizonte \
 temporal correspondiente entre parentesis: (1D), (W=5d), (M=21d) o (Q=63d). Ejemplo correcto: \
 "Oil +47.1% (M=21d)". Ejemplo incorrecto: "Oil subio 47%".
 EXCEPCION: el Fear & Greed (CNN F&G, BTC F&G) NO tiene horizonte temporal — NUNCA uses (1D), (W), (M) ni (Q) junto al F&G.
+
+REGLA DE CAUSALIDAD:
+- La CAUSA_RAIZ debe estar respaldada por: (a) al menos 1 dato de mercado Y (b) al menos 1 noticia o indicador macro.
+- Debes mencionar al menos 2 drivers distintos si existen en los datos (geopolitica, tasas/inflacion, dolar/liquidez, credit stress). Ejemplo correcto: "tensiones geopoliticas + presion inflacionaria via petroleo". Si solo hay 1 dominante → justificar explicitamente por que domina.
+- PROHIBIDO reducir todo a geopolitica si los datos muestran multiples presiones simultaneas.
+- Si no hay evidencia suficiente → usar lenguaje probabilistico: "probablemente", "consistente con", "sugiere".
+- PROHIBIDO atribuir TODO a una sola causa sin evidencia clara.
+- PROHIBIDO usar narrativa geopolitica si los activos no lo reflejan claramente.
 
 DATOS DE MERCADO — {TODAY}
 
@@ -405,7 +453,7 @@ SENALES:
 - [activo] [W/M/Q]: [observacion con numero concreto]
 - [activo] [W/M/Q]: [observacion con numero concreto]
 
-DIVERGENCIAS: [max 2 divergencias notables con numeros, o "Sin divergencias relevantes"]"""
+DIVERGENCIAS: [max 2 divergencias notables con numeros. Usa lenguaje preciso y no binario. Ejemplo correcto: "credito no confirma el estres de equities (HY 320bps vs VIX 27)". Ejemplo incorrecto: "HY 320bps → no hay crisis". O escribe "Sin divergencias relevantes"]"""
 
     return _groq_call(prompt, max_tokens=600)
 
@@ -429,16 +477,17 @@ def build_tldr(interp, cnn, btc, closes, fred):
     prompt = f"""Usando esta interpretacion del mercado como base:
 
 {interp}
-
+{REGLAS_GLOBALES}
 RETORNOS 1D EXACTOS DE HOY (usa estos numeros exactos — NO los cambies):
 {retornos_1d}
 
 REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
-CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas. EXCEPCION: el Fear & Greed NO tiene horizonte temporal — NUNCA uses (1D), (W=5d), (M=21d) ni (Q=63d) junto al F&G.
+CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. EXCEPCION: el Fear & Greed NO tiene horizonte temporal.
+
+REGLA DE PRIORIDAD: el movimiento mas relevante debe ser el de MAYOR magnitud relativa en (1D) O el mas informativo macro (el que mejor explica el regimen). Elige uno y justifica brevemente por que es el mas relevante. No elegir arbitrariamente.
 
 Genera un TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ".
-Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante HOY usando SOLO el retorno (1D) de los RETORNOS 1D EXACTOS — nunca uses W/M/Q para describir lo que paso hoy, \
-(3) tension o divergencia mas importante, (4) que vigilar esta semana.
+Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante HOY usando SOLO retorno (1D) exacto, (3) tension o divergencia mas importante, (4) que vigilar esta semana.
 Datos adicionales: 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 | BTC F&G {btc.get('score','N/D')}/100
 Sin titulos, sin introduccion, solo los 4 bullets."""
 
@@ -448,8 +497,10 @@ Sin titulos, sin introduccion, solo los 4 bullets."""
 def build_3m_view(interp, closes, fred):
     oil_m  = _ret(_scalar(closes['CL=F'].dropna(),   -21), _scalar(closes['CL=F'].dropna()))  \
              if 'CL=F'  in closes.columns else 'N/D'
+    sp_now = _scalar(closes['^GSPC'].dropna()) if '^GSPC' in closes.columns else 'N/D'
     sp_q   = _ret(_scalar(closes['^GSPC'].dropna(),  0),   _scalar(closes['^GSPC'].dropna())) \
              if '^GSPC' in closes.columns else 'N/D'
+    oil_now = _scalar(closes['CL=F'].dropna()) if 'CL=F' in closes.columns else 'N/D'
     hy     = fred.get('BAMLH0A0HYM2', {}).get('value', 'N/D')
     dgs10  = fred.get('DGS10',        {}).get('value', 'N/D')
     t5yie  = fred.get('T5YIE',        {}).get('value', 'N/D')
@@ -457,21 +508,33 @@ def build_3m_view(interp, closes, fred):
     prompt = f"""Usando esta interpretacion del mercado como base:
 
 {interp}
+{REGLAS_GLOBALES}
+PRECIOS ACTUALES EXACTOS (ancla para todos tus calculos):
+S&P 500: {sp_now} | Oil WTI: {oil_now} | HY spread: {hy}% | 10Y: {dgs10}% | Inflacion impl 5Y: {t5yie}%
+
+REGLA CRITICA — ANCLA NUMERICA PARA S&P 500:
+- Nivel actual S&P 500: {sp_now}
+- Una caida de 5% → {f'{sp_now * 0.95:.0f}' if isinstance(sp_now, float) else 'nivel_actual * 0.95'}
+- Una caida de 10% → {f'{sp_now * 0.90:.0f}' if isinstance(sp_now, float) else 'nivel_actual * 0.90'}
+- Una subida de 10% → {f'{sp_now * 1.10:.0f}' if isinstance(sp_now, float) else 'nivel_actual * 1.10'}
+- PROHIBIDO usar niveles recordados o historicos. Si hay duda → usa SOLO % sin nivel absoluto.
 
 REGLA para datos historicos: cada variacion porcentual pasada debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
-REGLA para proyecciones: NO uses etiquetas de horizonte. Usa lenguaje temporal claro: "en 3 meses", "hacia junio", "en el proximo trimestre".
-CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas. EXCEPCION: el Fear & Greed NO tiene horizonte temporal — NUNCA uses (1D), (W=5d), (M=21d) ni (Q=63d) junto al F&G.
+REGLA para proyecciones: NO uses etiquetas de horizonte. Usa lenguaje temporal: "en 3 meses", "hacia junio".
+REGLA de niveles: usa PORCENTAJES principalmente; niveles absolutos SOLO si son consistentes con el precio actual calculado.
 
-Genera un 3M VIEW (perspectiva proximos 3 meses) con EXACTAMENTE 5 bullets en espanol, \
-comenzando cada uno con "- ".
-Datos adicionales: Oil M {oil_m} | S&P Q {sp_q} | HY spread {hy} | 10Y {dgs10}% | Inflacion impl 5Y {t5yie}%
+REGLAS ADICIONALES PARA ESCENARIOS:
+- Cada escenario DEBE partir desde los PRECIOS ACTUALES EXACTOS provistos arriba.
+- Antes de escribir un nivel: calcula nivel_actual * (1 + % cambio). Si el resultado no tiene sentido → usa solo %.
+- PROHIBIDO: mezclar niveles de otro regimen historico, targets sin base matematica en precios actuales.
 
-1. Base case (~60%): escenario mas probable con cifras concretas (niveles, porcentajes)
-2. Bear case (~20%): que podria salir peor, con causa especifica y cifra de referencia
+Genera un 3M VIEW con EXACTAMENTE 5 bullets en espanol, comenzando cada uno con "- ".
+1. Base case (~60%): escenario mas probable con % concretos
+2. Bear case (~20%): que podria salir peor, causa especifica y % de referencia
 3. Bull case (~15%): sorpresa positiva y condicion necesaria concreta
-4. Claves a monitorear: 2-3 indicadores con umbrales numericos exactos
+4. Claves a monitorear: 2-3 indicadores con thresholds binarios claros. Formato: "indicador >X = estres / <Y = normalizacion". Evita rangos vagos como "entre 25-30". Ejemplo correcto: "VIX >32 = capitulacion, VIX <22 = normalizacion".
 5. Implicancias para activos: equities / bonos / oro / crypto / commodities
-
+{CHECK_FINAL}
 Sin titulos, sin introduccion, solo los 5 bullets."""
 
     return _groq_call(prompt, max_tokens=700)
@@ -489,19 +552,24 @@ def build_wwcm(interp, tensions, closes, fred):
     prompt = f"""Usando esta interpretacion del mercado como base:
 
 {interp}
-
-PRECIOS ACTUALES (usa estos niveles como referencia exacta para tus umbrales — NO uses otros):
+{REGLAS_GLOBALES}
+PRECIOS ACTUALES (referencia exacta — NO uses otros niveles):
 S&P 500: {sp} | VIX: {vix} | Oil WTI: {oil} | HY spread: {hy}% | 10Y Treasury: {dgs}%
 
 REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
-CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas. EXCEPCION: el Fear & Greed NO tiene horizonte temporal — NUNCA uses (1D), (W=5d), (M=21d) ni (Q=63d) junto al F&G.
+CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. EXCEPCION: el Fear & Greed NO tiene horizonte temporal.
 
-Tensiones detectadas automaticamente:
-{tens_txt}
+REGLAS PARA UMBRALES:
+- Cada umbral debe ser REALISTA respecto al nivel actual. No puedes usar niveles ya alcanzados como condicion futura.
+- Ejemplo: si Oil = 98, no puedes decir "riesgo si supera 85" (ya fue superado).
+- Usa buffers logicos: cerca = ±5%, significativo = ±10-15%.
+- Cada condicion debe implicar un CAMBIO REAL de regimen, no algo trivial o ya ocurrido.
 
-Genera "WHAT WOULD CHANGE MY MIND" con 4-5 condiciones concretas que cambiarian el regimen actual.
-Formato: bullets en espanol comenzando con "- ".
-Cada bullet: condicion especifica + umbral numerico realista basado en los PRECIOS ACTUALES + que implicaria para los mercados.
+Tensiones detectadas: {tens_txt}
+
+Genera "WHAT WOULD CHANGE MY MIND" con 4-5 condiciones que cambiarian el regimen actual.
+Bullets en espanol comenzando con "- ". Umbral numerico realista + implicancia para mercados.
+{CHECK_FINAL}
 Sin titulos, sin introduccion, solo los bullets."""
 
     return _groq_call(prompt, max_tokens=500)
@@ -522,12 +590,19 @@ def build_usdclp_comment(interp, closes):
     prompt = f"""Usando esta interpretacion del mercado como base:
 
 {interp}
-
+{REGLAS_GLOBALES}
 REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
 
+REGLA MULTI-FACTOR:
+- Debes considerar al menos 2 factores (DXY + cobre, o riesgo global + cobre).
+- Si los factores son contradictorios → mencionar la tension explicitamente.
+- PROHIBIDO relaciones lineales simplistas tipo "S&P baja → CLP sube" sin matices.
+
+REGLA TEMPORAL: usa SOLO lenguaje natural para proyecciones ("proximas semanas", "en el corto plazo", "en un mes"). PROHIBIDO usar etiquetas tecnicas (W=5d), (M=21d), (Q=63d) en proyecciones futuras — esas etiquetas son SOLO para retornos historicos pasados.
+
 Genera un comentario sobre el USDCLP. 2-3 oraciones.
-Datos: USDCLP {clp_now} | W {clp_w} | M {clp_m} | Q {clp_q} | Cobre Q {cu_q} | DXY Q {dxy_q}
-Incluye: nivel actual en contexto, presiones dominantes (cobre/DXY/EM), direccion esperada proximas semanas.
+Datos: USDCLP {clp_now} | Retorno W: {clp_w} | M: {clp_m} | Q: {clp_q} | Cobre Q: {cu_q} | DXY Q: {dxy_q}
+Incluye: nivel actual en contexto, presiones dominantes con al menos 2 factores, direccion esperada en las proximas semanas.
 En espanol, directo al punto, sin titulos."""
 
     return _groq_call(prompt, max_tokens=300)
