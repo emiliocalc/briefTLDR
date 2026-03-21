@@ -160,7 +160,31 @@ def get_fred():
     with open(p, encoding='utf-8') as f:
         return json.load(f)
 
+def _fg_rating(score):
+    if score is None: return 'N/A'
+    if score < 25:  return 'extreme fear'
+    if score < 45:  return 'fear'
+    if score < 55:  return 'neutral'
+    if score < 75:  return 'greed'
+    return 'extreme greed'
+
 def get_cnn_fg():
+    # Fuente principal: finhacker.cz (no bloqueada por GitHub Actions)
+    try:
+        r = requests.get(
+            'https://www.finhacker.cz/wp-content/data/fng-live.json',
+            timeout=10)
+        d = r.json()
+        s = round(float(d['score']), 1)
+        result = {'score': s, 'rating': _fg_rating(s), 'change': None}
+        # Guardar en cache
+        cache = os.path.join(DATA_DIR, 'cnn_fg_cache.json')
+        with open(cache, 'w', encoding='utf-8') as f:
+            json.dump(result, f)
+        return result
+    except Exception:
+        pass
+    # Fallback: CNN directo
     try:
         r = requests.get(
             'https://production.dataviz.cnn.io/index/fearandgreed/graphdata',
@@ -172,14 +196,16 @@ def get_cnn_fg():
         return {'score': round(s, 1), 'rating': fg['rating'],
                 'change': round(s - fg['previous_close'], 1)}
     except Exception:
-        cache = os.path.join(DATA_DIR, 'cnn_fg_cache.json')
-        if os.path.exists(cache):
-            try:
-                with open(cache, encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return {'score': None, 'rating': 'N/A', 'change': None}
+        pass
+    # Fallback: cache local
+    cache = os.path.join(DATA_DIR, 'cnn_fg_cache.json')
+    if os.path.exists(cache):
+        try:
+            with open(cache, encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {'score': None, 'rating': 'N/A', 'change': None}
 
 def get_btc_fg():
     try:
@@ -205,7 +231,8 @@ def get_news(max_items=10):
                     continue
                 score = sum(1 for kw in NEWS_KEYWORDS if kw in combined)
                 articles.append({'title': title, 'source': source,
-                                  'summary': e.get('summary', '')[:200], 'score': score})
+                                  'summary': e.get('summary', '')[:200], 'score': score,
+                                  'url': e.get('link', '')})
         except Exception:
             continue
     articles.sort(key=lambda x: x['score'], reverse=True)
@@ -497,13 +524,12 @@ class PDF(FPDF):
         pass
 
     def footer(self):
-        self.set_y(-10)
-        self.set_font('Helvetica', '', 6)
+        self.set_y(-14)
+        self.set_font('Helvetica', '', 8)
         self.set_text_color(150, 150, 150)
         now = datetime.now().strftime('%Y-%m-%d %H:%M')
-        self.cell(0, 4, clean(
-            f'Generado: {now}  |  Groq llama-3.3-70b-versatile  |  '
-            f'yfinance + FRED + RSS'), align='C')
+        self.cell(0, 4, clean(f'Vista Macro  |  Generado: {now}  |  yfinance + FRED + RSS'), align='C', ln=True)
+        self.cell(0, 4, clean('(*) = interpretacion de Groq en base a los datos descargados'), align='C')
 
     def section(self, title, min_space=55, color=None):
         # Si no queda suficiente espacio, saltar a página nueva
@@ -546,10 +572,10 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     date_fmt = datetime.strptime(TODAY, '%Y-%m-%d').strftime('%d/%m/%Y')
     pdf.set_font('Helvetica', 'B', 16)
     pdf.set_text_color(30, 30, 40)
-    pdf.cell(0, 10, clean('The Global Compounder'), ln=True, align='L')
+    pdf.cell(0, 10, clean(f'Vista Macro  {date_fmt}'), ln=True, align='L')
     pdf.set_font('Helvetica', '', 8)
     pdf.set_text_color(130, 130, 140)
-    pdf.cell(0, 5, clean(f'Macro Brief  |  {date_fmt}  |  Powered by Groq llama-3.3-70b'), ln=True)
+    pdf.cell(0, 5, clean('Macro Brief  |  yfinance + FRED + RSS'), ln=True)
     pdf.ln(4)
     pdf.set_draw_color(200, 200, 210)
     pdf.set_line_width(0.3)
@@ -561,7 +587,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.set_fill_color(245, 245, 230)
     pdf.set_draw_color(200, 190, 130)
     pdf.set_line_width(0.3)
-    pdf.set_font('Helvetica', 'I', 6.5)
+    pdf.set_font('Helvetica', 'I', 8)
     pdf.set_text_color(100, 90, 40)
     yesterday = (datetime.strptime(TODAY, '%Y-%m-%d')
                  .replace(hour=0, minute=0, second=0))
@@ -587,7 +613,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(3)
 
     # ── TL;DR ─────────────────────────────────────────────────────────────────
-    pdf.section('[TL;DR] RESUMEN EJECUTIVO')
+    pdf.section('[TL;DR] RESUMEN EJECUTIVO (*)')
     if tldr:
         for line in tldr.split('\n'):
             line = line.strip().lstrip('-* ')
@@ -607,7 +633,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
 
     # ── Resumen de activos ────────────────────────────────────────────────────
     pdf.section('[M] RESUMEN DE ACTIVOS')
-    pdf.set_font('Helvetica', 'B', 7)
+    pdf.set_font('Helvetica', 'B', 8)
     pdf.set_fill_color(230, 235, 245)
     pdf.cell(36, 5.5, 'Activo',  fill=True)
     pdf.cell(20, 5.5, 'Precio',  fill=True, align='R')
@@ -635,9 +661,12 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         r_w  = _ret(_scalar(s, -5),  price) if len(s) >= 5  else 'N/D'
         r_m  = _ret(_scalar(s, -21), price) if len(s) >= 21 else 'N/D'
         r_q  = _ret(_scalar(s, 0),   price)
-        pdf.set_font('Helvetica', '', 7)
+        pdf.set_font('Helvetica', '', 8)
         pdf.set_fill_color(248, 248, 252)
-        pdf.cell(36, 5, clean(label), fill=True)
+        yf_url = f'https://finance.yahoo.com/quote/{t.replace("^", "%5E").replace("=", "%3D")}'
+        pdf.set_text_color(20, 80, 160)
+        pdf.cell(36, 5, clean(label), fill=True, link=yf_url)
+        pdf.set_text_color(0, 0, 0)
         pdf.cell(20, 5, f'{price:.2f}', fill=True, align='R')
         for r in [r_1d, r_w, r_m, r_q]:
             pdf.set_text_color(*ret_color(r))
@@ -657,12 +686,16 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     # ── Noticias ──────────────────────────────────────────────────────────────
     pdf.section('[N] NOTICIAS')
     for a in news[:8]:
-        pdf.set_font('Helvetica', 'B', 6.5)
+        url = a.get('url', '')
         pdf.set_left_margin(8)
         pdf.set_x(8)
-        pdf.multi_cell(0, 4.5, clean(f'[{a["source"]}] {a["title"]}'), align='L')
+        pdf.set_font('Helvetica', 'B', 8)
+        if url:
+            pdf.set_text_color(20, 80, 160)
+        pdf.multi_cell(0, 4.5, clean(f'[{a["source"]}] {a["title"]}'), align='L', link=url)
+        pdf.set_text_color(0, 0, 0)
         if a.get('summary'):
-            pdf.set_font('Helvetica', '', 6)
+            pdf.set_font('Helvetica', '', 8)
             pdf.set_left_margin(8)
             pdf.set_x(8)
             pdf.multi_cell(0, 4, clean(a['summary'][:160]), align='J')
@@ -674,7 +707,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         'REGIMEN': 'Régimen', 'CAUSA_RAIZ': 'Causa Raíz',
         'SENALES': 'Señales', 'DIVERGENCIAS': 'Divergencias',
     }
-    pdf.section('[I] INTERPRETACION BASE', min_space=90)
+    pdf.section('[I] INTERPRETACION BASE (*)', min_space=90)
     if interp:
         for line in interp.split('\n'):
             line = line.strip()
@@ -688,19 +721,19 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
                 old_lm = pdf.l_margin
                 pdf.set_left_margin(8)
                 pdf.set_x(8)
-                pdf.set_font('Helvetica', 'B', 7.5)
+                pdf.set_font('Helvetica', 'B', 8)
                 pdf.set_text_color(50, 50, 50)
                 pdf.cell(0, 5, clean(label + ':'), ln=True)
                 pdf.set_text_color(0, 0, 0)
                 if content:
-                    pdf.set_font('Helvetica', '', 7.5)
+                    pdf.set_font('Helvetica', '', 8)
                     pdf.set_x(8)
                     pdf.multi_cell(0, 5, clean(content), align='J')
                 pdf.set_left_margin(old_lm)
             elif line.startswith('-'):
-                pdf.body(line.lstrip('-* '), size=7.5, indent=8)
+                pdf.body(line.lstrip('-* '), size=8, indent=8)
             else:
-                pdf.body(line, size=7.5, indent=8)
+                pdf.body(line, size=8, indent=8)
     pdf.ln(2)
 
     # ── USDCLP ────────────────────────────────────────────────────────────────
@@ -711,7 +744,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     vix = closes['^VIX'].dropna()     if '^VIX'     in closes.columns else None
     sp  = closes['^GSPC'].dropna()    if '^GSPC'    in closes.columns else None
 
-    pdf.section('[CLP]  USDCLP / PESO CHILENO')
+    pdf.section('[CLP] USDCLP / PESO CHILENO (*)')
 
     # Headline: precio + 1D + YTD
     if clp is not None and len(clp) >= 2:
@@ -731,7 +764,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
 
     # Tabla de factores
     fac_w = [38, 26, 22, 36]
-    pdf.set_font('Helvetica', 'B', 7)
+    pdf.set_font('Helvetica', 'B', 8)
     pdf.set_fill_color(220, 230, 245)
     for h, w in zip(['Factor', 'Valor', 'YTD%', 'Efecto en CLP'], fac_w):
         pdf.cell(w, 5.5, h, fill=True, align='C' if h != 'Factor' else 'L')
@@ -754,7 +787,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     if ff: factors.append(('Fed Funds', f'{ff:.2f}%', '---', ('alto = CLP -', False)))
 
     for name, val, ytd_v, (eff, positive) in factors:
-        pdf.set_font('Helvetica', '', 7)
+        pdf.set_font('Helvetica', '', 8)
         pdf.set_fill_color(248, 250, 254)
         pdf.cell(fac_w[0], 5, clean(name), fill=True)
         pdf.cell(fac_w[1], 5, clean(val),  fill=True, align='R')
@@ -767,7 +800,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(3)
 
     if usdclp_comment:
-        pdf.set_font('Helvetica', 'I', 7.5)
+        pdf.set_font('Helvetica', 'I', 8)
         pdf.set_left_margin(8)
         pdf.set_x(8)
         pdf.multi_cell(0, 5, clean(usdclp_comment), align='J')
@@ -782,16 +815,16 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         for date, name, pri, desc in events:
             pc = PRIORITY_COLOR.get(pri, (80, 80, 80))
             pdf.set_x(8)
-            pdf.set_font('Helvetica', 'B', 7)
+            pdf.set_font('Helvetica', 'B', 8)
             pdf.set_text_color(*pc)
             pdf.cell(28, 5, clean(f'{date}  [{pri}]'))
             pdf.set_text_color(0, 0, 0)
-            pdf.set_font('Helvetica', '', 7)
+            pdf.set_font('Helvetica', '', 8)
             pdf.cell(0, 5, clean(name), ln=True)
         pdf.ln(2)
 
     # ── WWCM ──────────────────────────────────────────────────────────────────
-    pdf.section('[W] WHAT WOULD CHANGE MY MIND', min_space=70)
+    pdf.section('[W] WHAT WOULD CHANGE MY MIND (*)', min_space=70)
     if wwcm:
         for line in wwcm.split('\n'):
             line = line.strip().lstrip('-* ')
@@ -801,7 +834,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.ln(2)
 
     # ── 3M View ───────────────────────────────────────────────────────────────
-    pdf.section('[3M] 3M VIEW — BASED ON CURRENT BRIEF', min_space=70)
+    pdf.section('[3M] 3M VIEW — BASED ON CURRENT BRIEF (*)', min_space=70)
     if v3:
         for line in v3.split('\n'):
             line = line.strip().lstrip('-* ')
