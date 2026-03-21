@@ -332,7 +332,7 @@ def upcoming_next(n=4):
 # ── groq ─────────────────────────────────────────────────────────────────────
 def _groq_call(prompt, max_tokens=800):
     api_key = os.environ.get('GROQ_API_KEY', '')
-    model   = os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')
+    model   = os.environ.get('GROQ_MODEL', 'deepseek-r1-distill-llama-70b')
     if not api_key:
         return None
     try:
@@ -412,22 +412,34 @@ DIVERGENCIAS: [max 2 divergencias notables con numeros, o "Sin divergencias rele
 
 # ── ETAPA 2: Secciones ────────────────────────────────────────────────────────
 def build_tldr(interp, cnn, btc, closes, fred):
-    vix   = _scalar(closes['^VIX'].dropna())   if '^VIX'  in closes.columns else 'N/D'
+    def r1d(t):
+        s = closes[t].dropna() if t in closes.columns else None
+        return _ret(_scalar(s, -2), _scalar(s)) if s is not None and len(s) >= 2 else 'N/D'
+
     dgs10 = fred.get('DGS10', {}).get('value', 'N/D')
     sp_q  = _ret(_scalar(closes['^GSPC'].dropna(), 0), _scalar(closes['^GSPC'].dropna())) \
             if '^GSPC' in closes.columns else 'N/D'
+
+    retornos_1d = (
+        f"S&P 500 (1D): {r1d('^GSPC')} | VIX (1D): {r1d('^VIX')} | "
+        f"Oil WTI (1D): {r1d('CL=F')} | Oro (1D): {r1d('GC=F')} | "
+        f"DXY (1D): {r1d('DX-Y.NYB')} | USDCLP (1D): {r1d('USDCLP=X')}"
+    )
 
     prompt = f"""Usando esta interpretacion del mercado como base:
 
 {interp}
 
+RETORNOS 1D EXACTOS DE HOY (usa estos numeros exactos — NO los cambies):
+{retornos_1d}
+
 REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
 CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas. EXCEPCION: el Fear & Greed NO tiene horizonte temporal — NUNCA uses (1D), (W=5d), (M=21d) ni (Q=63d) junto al F&G.
 
 Genera un TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ".
-Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante HOY usando SOLO el retorno (1D) — nunca uses W/M/Q para describir lo que paso hoy, \
+Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante HOY usando SOLO el retorno (1D) de los RETORNOS 1D EXACTOS — nunca uses W/M/Q para describir lo que paso hoy, \
 (3) tension o divergencia mas importante, (4) que vigilar esta semana.
-Datos adicionales: VIX {vix} | 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 (subir=menos miedo, bajar=mas miedo) | BTC F&G {btc.get('score','N/D')}/100 (misma escala)
+Datos adicionales: 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 | BTC F&G {btc.get('score','N/D')}/100
 Sin titulos, sin introduccion, solo los 4 bullets."""
 
     return _groq_call(prompt, max_tokens=400)
@@ -465,12 +477,21 @@ Sin titulos, sin introduccion, solo los 5 bullets."""
     return _groq_call(prompt, max_tokens=700)
 
 
-def build_wwcm(interp, tensions):
+def build_wwcm(interp, tensions, closes, fred):
     tens_txt = '\n'.join(f'! {t}' for t in tensions) if tensions else 'Sin tensiones detectadas.'
+
+    sp  = _scalar(closes['^GSPC'].dropna())  if '^GSPC'    in closes.columns else 'N/D'
+    vix = _scalar(closes['^VIX'].dropna())   if '^VIX'     in closes.columns else 'N/D'
+    oil = _scalar(closes['CL=F'].dropna())   if 'CL=F'     in closes.columns else 'N/D'
+    hy  = fred.get('BAMLH0A0HYM2', {}).get('value', 'N/D')
+    dgs = fred.get('DGS10',        {}).get('value', 'N/D')
 
     prompt = f"""Usando esta interpretacion del mercado como base:
 
 {interp}
+
+PRECIOS ACTUALES (usa estos niveles como referencia exacta para tus umbrales — NO uses otros):
+S&P 500: {sp} | VIX: {vix} | Oil WTI: {oil} | HY spread: {hy}% | 10Y Treasury: {dgs}%
 
 REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
 CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas. EXCEPCION: el Fear & Greed NO tiene horizonte temporal — NUNCA uses (1D), (W=5d), (M=21d) ni (Q=63d) junto al F&G.
@@ -480,7 +501,7 @@ Tensiones detectadas automaticamente:
 
 Genera "WHAT WOULD CHANGE MY MIND" con 4-5 condiciones concretas que cambiarian el regimen actual.
 Formato: bullets en espanol comenzando con "- ".
-Cada bullet: condicion especifica + umbral numerico + que implicaria para los mercados.
+Cada bullet: condicion especifica + umbral numerico realista basado en los PRECIOS ACTUALES + que implicaria para los mercados.
 Sin titulos, sin introduccion, solo los bullets."""
 
     return _groq_call(prompt, max_tokens=500)
@@ -975,7 +996,7 @@ def run():
     print('  3M View...')
     v3             = build_3m_view(interp, closes, fred)
     print('  WWCM...')
-    wwcm           = build_wwcm(interp, tensions)
+    wwcm           = build_wwcm(interp, tensions, closes, fred)
     print('  USDCLP...')
     usdclp_comment = build_usdclp_comment(interp, closes)
     print('  OK — 4 secciones generadas')
