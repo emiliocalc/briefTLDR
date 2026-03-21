@@ -346,6 +346,7 @@ de distribucion publica. Es critico que la causa raiz este anclada en datos y no
 REGLA OBLIGATORIA: cada vez que menciones una variacion porcentual, DEBES especificar el horizonte \
 temporal correspondiente entre parentesis: (1D), (W=5d), (M=21d) o (Q=63d). Ejemplo correcto: \
 "Oil +47.1% (M=21d)". Ejemplo incorrecto: "Oil subio 47%".
+EXCEPCION: el Fear & Greed (CNN F&G, BTC F&G) NO tiene horizonte temporal — NUNCA uses (1D), (W), (M) ni (Q) junto al F&G.
 
 DATOS DE MERCADO — {TODAY}
 
@@ -394,7 +395,7 @@ def build_tldr(interp, cnn, btc, closes, fred):
 {interp}
 
 REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
-CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas.
+CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas. EXCEPCION: el Fear & Greed NO tiene horizonte temporal — NUNCA uses (1D), (W=5d), (M=21d) ni (Q=63d) junto al F&G.
 
 Genera un TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ".
 Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante HOY usando SOLO el retorno (1D) — nunca uses W/M/Q para describir lo que paso hoy, \
@@ -420,7 +421,7 @@ def build_3m_view(interp, closes, fred):
 
 REGLA para datos historicos: cada variacion porcentual pasada debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
 REGLA para proyecciones: NO uses etiquetas de horizonte. Usa lenguaje temporal claro: "en 3 meses", "hacia junio", "en el proximo trimestre".
-CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas.
+CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas. EXCEPCION: el Fear & Greed NO tiene horizonte temporal — NUNCA uses (1D), (W=5d), (M=21d) ni (Q=63d) junto al F&G.
 
 Genera un 3M VIEW (perspectiva proximos 3 meses) con EXACTAMENTE 5 bullets en espanol, \
 comenzando cada uno con "- ".
@@ -445,7 +446,7 @@ def build_wwcm(interp, tensions):
 {interp}
 
 REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
-CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas.
+CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. Un F&G de 16 subiendo a 30 significa MENOS miedo, no mas. EXCEPCION: el Fear & Greed NO tiene horizonte temporal — NUNCA uses (1D), (W=5d), (M=21d) ni (Q=63d) junto al F&G.
 
 Tensiones detectadas automaticamente:
 {tens_txt}
@@ -515,7 +516,7 @@ class PDF(FPDF):
         self.set_text_color(0, 0, 0)
         self.ln(1)
 
-    def body(self, text, size=8, indent=10):
+    def body(self, text, size=8, indent=8):
         self.set_font('Helvetica', '', size)
         old_lm = self.l_margin
         self.set_left_margin(indent)
@@ -684,24 +685,22 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
                 raw_label = parts[0].strip().upper().replace(' ', '_')
                 label = _LABEL_MAP.get(raw_label, parts[0].strip().title())
                 content = parts[1].strip() if len(parts) > 1 else ''
+                old_lm = pdf.l_margin
+                pdf.set_left_margin(8)
+                pdf.set_x(8)
                 pdf.set_font('Helvetica', 'B', 7.5)
                 pdf.set_text_color(50, 50, 50)
-                old_lm = pdf.l_margin
-                pdf.set_left_margin(10)
-                pdf.set_x(10)
                 pdf.cell(0, 5, clean(label + ':'), ln=True)
                 pdf.set_text_color(0, 0, 0)
                 if content:
                     pdf.set_font('Helvetica', '', 7.5)
-                    pdf.set_left_margin(14)
-                    pdf.set_x(14)
+                    pdf.set_x(8)
                     pdf.multi_cell(0, 5, clean(content), align='J')
                 pdf.set_left_margin(old_lm)
             elif line.startswith('-'):
-                # item de lista dentro de [I] — sin guión, alineado a indent 14
-                pdf.body(line.lstrip('-* '), size=7.5, indent=14)
+                pdf.body(line.lstrip('-* '), size=7.5, indent=8)
             else:
-                pdf.body(line, size=7.5, indent=14)
+                pdf.body(line, size=7.5, indent=8)
     pdf.ln(2)
 
     # ── USDCLP ────────────────────────────────────────────────────────────────
@@ -722,7 +721,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
                               for _ in [1] if len(clp.loc[clp.index >= f'{datetime.today().year}-01-01']) > 0),
                              float(clp.iloc[0])), clp_val)
         pdf.set_font('Helvetica', 'B', 8)
-        pdf.set_x(10)
+        pdf.set_x(8)
         pdf.cell(30, 6, clean(f'USDCLP: {clp_val:.0f}'))
         pdf.set_text_color(*ret_color(clp_1d))
         pdf.cell(28, 6, clean(f'1D: {clp_1d}'))
@@ -769,8 +768,10 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
 
     if usdclp_comment:
         pdf.set_font('Helvetica', 'I', 7.5)
-        pdf.set_x(10)
-        pdf.multi_cell(0, 5, clean(usdclp_comment))
+        pdf.set_left_margin(8)
+        pdf.set_x(8)
+        pdf.multi_cell(0, 5, clean(usdclp_comment), align='J')
+        pdf.set_left_margin(8)
     pdf.ln(3)
 
     # ── Upcoming events ───────────────────────────────────────────────────────
@@ -780,7 +781,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         PRIORITY_COLOR = {'HIGH': (200, 0, 0), 'MED': (180, 120, 0), 'LOW': (80, 80, 80)}
         for date, name, pri, desc in events:
             pc = PRIORITY_COLOR.get(pri, (80, 80, 80))
-            pdf.set_x(10)
+            pdf.set_x(8)
             pdf.set_font('Helvetica', 'B', 7)
             pdf.set_text_color(*pc)
             pdf.cell(28, 5, clean(f'{date}  [{pri}]'))
