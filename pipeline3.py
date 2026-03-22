@@ -857,8 +857,19 @@ class PDF(FPDF):
         self.set_y(-14)
         self.set_font('Helvetica', '', 8)
         self.set_text_color(150, 150, 150)
-        now = datetime.now().strftime('%Y-%m-%d %H:%M')
-        self.cell(0, 4, clean(f'Vista Macro  |  Generado: {now}  |  yfinance + FRED + RSS'), align='C', ln=True)
+        utc_now      = datetime.utcnow()
+        # Santiago: UTC-3 en verano (oct-mar), UTC-4 en invierno (abr-sep)
+        stgo_offset  = -3 if utc_now.month in (10, 11, 12, 1, 2, 3) else -4
+        # New York: UTC-4 en verano (mar-nov), UTC-5 en invierno (nov-mar)
+        ny_offset    = -4 if 3 <= utc_now.month <= 11 else -5
+        from datetime import timedelta
+        stgo_time    = (utc_now + timedelta(hours=stgo_offset)).strftime('%H:%M')
+        ny_time      = (utc_now + timedelta(hours=ny_offset)).strftime('%H:%M')
+        stgo_utc_lbl = f'UTC{stgo_offset:+d}'
+        ny_utc_lbl   = f'UTC{ny_offset:+d}'
+        date_str     = (utc_now + timedelta(hours=stgo_offset)).strftime('%d/%m/%Y')
+        footer1 = f'Generado el {date_str} a las {stgo_time} (Santiago {stgo_utc_lbl}) / {ny_time} (New York {ny_utc_lbl})  |  yfinance + FRED + RSS'
+        self.cell(0, 4, clean(footer1), align='C', ln=True)
         self.cell(0, 4, clean('(*) = interpretacion de Gemini en base a los datos descargados'), align='C')
 
     def section(self, title, min_space=55, color=None):
