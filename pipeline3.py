@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Pipeline 3 — The Global Compounder (distribución pública)
+Pipeline 3 — Vista Macro (distribución pública)
 Arquitectura 2 etapas:
-  Etapa 1: Interpretacion base (1 llamada Groq) — regimen + causa + senales + tensiones
-  Etapa 2: Secciones del reporte (4 llamadas Groq usando la interpretacion base)
+  Etapa 1: Interpretacion base (1 llamada Gemini) — regimen + causa + senales + tensiones
+  Etapa 2: Secciones del reporte (4 llamadas Gemini usando la interpretacion base)
 
 Datos:
   - yfinance: 12 macro tickers × 63 sesiones (W=5, M=21, Q=63)
@@ -459,7 +459,7 @@ def _parse_interp(interp):
     return fields
 
 
-# ── llm call (Gemini si hay key, sino Groq) ──────────────────────────────────
+# ── llm call (Gemini primario, Groq como fallback) ───────────────────────────
 def _groq_call(prompt, max_tokens=800):
     gemini_key = os.environ.get('GEMINI_API_KEY', '')
     if gemini_key:
@@ -859,7 +859,7 @@ class PDF(FPDF):
         self.set_text_color(150, 150, 150)
         now = datetime.now().strftime('%Y-%m-%d %H:%M')
         self.cell(0, 4, clean(f'Vista Macro  |  Generado: {now}  |  yfinance + FRED + RSS'), align='C', ln=True)
-        self.cell(0, 4, clean('(*) = interpretacion de Groq en base a los datos descargados'), align='C')
+        self.cell(0, 4, clean('(*) = interpretacion de Gemini en base a los datos descargados'), align='C')
 
     def section(self, title, min_space=55, color=None):
         # Si no queda suficiente espacio, saltar a página nueva
@@ -930,10 +930,10 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     close_date = (yesterday - timedelta(days=delta)).strftime('%d/%m/%Y')
     disclaimer_text = (
         f'Todos los precios y retornos corresponden al cierre de mercado del {close_date}. '
-        f'La interpretacion de los datos es generada automaticamente por un modelo de inteligencia artificial (Groq llama-3.3-70b) que puede cometer errores. '
+        f'La interpretacion de los datos es generada automaticamente por un modelo de inteligencia artificial (Gemini 2.5 Flash) que puede cometer errores. '
         f'Este reporte es de caracter informativo y educativo. '
         f'No constituye asesoramiento financiero ni una recomendacion de inversion. '
-        f'The Global Compounder no se responsabiliza por decisiones tomadas en base a este contenido.'
+        f'Vista Macro no se responsabiliza por decisiones tomadas en base a este contenido.'
     )
     x0 = pdf.get_x()
     pdf.set_x(8)
@@ -1182,8 +1182,8 @@ def build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment):
     now = datetime.now()
     L = []
 
-    L += [f'# THE GLOBAL COMPOUNDER — MACRO BRIEF | {TODAY}',
-          f'*Pipeline 3  |  {now.strftime("%Y-%m-%d %H:%M")}  |  llama-3.3-70b-versatile*',
+    L += [f'# VISTA MACRO — MACRO BRIEF | {TODAY}',
+          f'*Pipeline 3  |  {now.strftime("%Y-%m-%d %H:%M")}  |  Gemini 2.5 Flash*',
           '']
 
     L += ['## [TL;DR]', '']
@@ -1287,7 +1287,7 @@ def run():
             print(f'  ! {t}')
 
     # 2. Etapa 1 — Interpretacion base
-    print('\n[2/3] Groq — Etapa 1: Interpretacion base...')
+    print('\n[2/3] Gemini — Etapa 1: Interpretacion base...')
     interp = build_interpretation(closes, fred, cnn, btc, news, tensions)
     if interp:
         print('  OK\n' + '-' * 55)
@@ -1300,7 +1300,7 @@ def run():
         regime_line = ''
 
     # 3. Etapa 2 — Secciones
-    print('\n[3/3] Groq — Etapa 2: Secciones...')
+    print('\n[3/3] Gemini — Etapa 2: Secciones...')
     print('  TL;DR...')
     tldr           = build_tldr(interp, cnn, btc, closes, fred)
     print('  3M View...')
