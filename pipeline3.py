@@ -329,48 +329,176 @@ def upcoming_next(n=4):
             for d, name, pri, desc in UPCOMING_EVENTS if d >= TODAY][:n]
 
 
-REGLAS_GLOBALES = """
-REGLAS DE CONSISTENCIA (OBLIGATORIAS):
+REGLAS_CONSISTENCIA = """
+REGLAS DE CONSISTENCIA NUMERICA (OBLIGATORIAS):
 
-1. NIVELES Y PROYECCIONES:
-   - Toda proyeccion de precio DEBE ser consistente con el nivel actual provisto en los datos.
-   - Ejemplo: si S&P = 6500, una caida de -10% implica ~5850. Nunca uses niveles como 3800.
-   - PROHIBIDO usar niveles historicos o default del modelo de entrenamiento.
+1. NIVELES Y PROYECCIONES
+   Toda proyeccion debe ser consistente con el spot actual:
+   nivel_futuro = nivel_actual x (1 + % cambio).
+   PROHIBIDO usar niveles historicos, escalas equivocadas o referencias de otro regimen.
 
-2. DIRECCION LOGICA:
-   - Si dices "sube X%", el nivel futuro DEBE ser mayor al actual.
-   - Si dices "cae X%", el nivel futuro DEBE ser menor al actual.
-   - Si hay contradiccion → NO escribir ese escenario.
+2. DIRECCION LOGICA
+   "Sube X%" implica nivel futuro MAYOR al actual.
+   "Baja X%" implica nivel futuro MENOR al actual.
+   Si hay contradiccion entre direccion y nivel, NO escribir ese escenario.
 
-3. COHERENCIA INTERNA:
-   - No puedes contradecir datos actuales.
-   - Ejemplo: si Oil = 98, no puedes decir "sube a 80" (80 < 98 = caida, no subida).
-   - Si un umbral ya fue superado → NO usarlo como condicion futura.
+3. COHERENCIA INTERNA
+   Si Oil=98, "sube a 80" es una caida.
+   Si un umbral ya fue alcanzado o superado, NO usarlo como trigger futuro.
+   No usar thresholds imposibles o redundantes dado el estado actual.
 
-4. ESCALA CORRECTA:
-   - Usa SIEMPRE los niveles provistos en los datos.
-   - PROHIBIDO mezclar escalas (ej: oro en 4500 vs 1800).
+4. MAGNITUD REALISTA
+   En horizonte de 3 meses, movimientos tipicos en equities estan en torno a ±5-15%.
+   Un movimiento mayor requiere una causa explicita y proporcional.
+   Si no hay base suficiente para un nivel preciso, usar rango.
 
-5. SI NO ESTAS SEGURO:
-   - Reduce precision en vez de inventar.
-   - Prefiere rangos ("caida adicional de 5-10%") en vez de niveles incorrectos.
+5. CONSISTENCIA CROSS-ASSET
+   Los escenarios deben conversar entre activos.
+   Oil fuerte y persistente debe implicar algo en inflacion esperada, VIX o crecimiento.
+   VIX cayendo no es consistente con proyeccion de caida fuerte en equities salvo explicacion explicita.
+   Stress en credito debe tener algun eco en riesgo, spreads o equities.
 
-6. PROHIBIDO NARRATIVE BIAS:
-   - No fuerces una historia unica para explicar todo.
-   - Si hay multiples drivers, mencionalos o reduce la certeza.
-   - Usa lenguaje probabilistico cuando no hay evidencia clara: "probablemente", "consistente con", "sugiere".
+6. CONSISTENCIA ENTRE ESCENARIOS
+   Bear_nivel < Base_nivel < Bull_nivel.
+   Cada escenario debe tener trigger, path y resultado distinguibles.
+   PROHIBIDO construir tres versiones de intensidad del mismo relato sin diferenciacion real.
+
+7. TERMINOS PRECISOS
+   No usar "capitulacion", "stress", "normalizacion", "alivio" o "dislocacion" sin respaldo numerico
+   o condicion observable. Si se usa un termino fuerte, debe estar anclado a un nivel o trigger concreto.
+"""
+
+REGLAS_EDITORIALES = """
+REGLAS EDITORIALES (OBLIGATORIAS):
+
+1. PROHIBIDO LENGUAJE GENERICO DE MARKET COMMENTARY
+   No usar "confirma", "refleja", "indica", "sugiere", "se observa", "presion alcista", "presion bajista"
+   salvo que se especifique: que hipotesis esta en juego, que dato la respalda, y que matiz existe.
+
+2. DRIVER MATERIAL
+   Un driver solo califica si tiene evidencia observable: movimiento >2% en horizonte util,
+   O cambio claro en spread/yield, O noticia con efecto directo visible en precio.
+   Un activo estable NO es driver activo. Puede ser divergencia o no-confirmacion, pero no driver.
+
+3. PARSIMONIA
+   Si los datos apuntan a una lectura simple, el analisis debe permitirse ser simple.
+   Si solo hay 1 driver material, declararlo explicitamente.
+   Si no hay divergencias relevantes, escribir "Sin divergencias relevantes".
+   No forzar multiples drivers, contrapesos o tensiones para sonar sofisticado.
+
+4. CONTRAPESO REAL
+   Solo mencionar factor contrario si existe evidencia observable.
+   Si todos los factores materiales apuntan igual, declararlo como "presion unidireccional".
+   PROHIBIDO inventar equilibrio o balance cuando los datos no lo muestran.
+
+5. DENSIDAD
+   Cada oracion debe agregar informacion nueva.
+   Si una oracion puede eliminarse sin perdida de insight, debe eliminarse.
+   PROHIBIDO rellenar con reformulaciones de la misma tesis.
+
+6. INCERTIDUMBRE HONESTA
+   Si la evidencia es mixta, mostrar la tension.
+   PROHIBIDO cerrar una historia limpia cuando los activos no lo permiten.
+   Si falta confirmacion, decirlo; no rellenarlo con causalidad elegante.
+
+7. TONO
+   Escribir como market note para lector informado.
+   No explicar VIX, spreads, DXY, HY, F&G ni conceptos basicos.
+   Evitar tono escolar, tono de consultor y tono de comentarista generico.
+
+8. NO DRAMATIZACION SIN EVIDENCIA
+   No usar lenguaje epico o sentencioso sin respaldo observable.
+   Evitar "falta limpieza", "no capitula", "mercado nervioso", "modo panico" salvo soporte cuantitativo.
+
+9. DISTINCION FUNCIONAL ENTRE BLOQUES
+   Cada bloque hace una tarea distinta:
+   Interpretation = marco analitico. TL;DR = priorizacion. 3M View = proyeccion.
+   WWCM = falsacion. USDCLP = traduccion al FX local.
+   PROHIBIDO reformular la misma tesis con sinonimos entre secciones.
+
+10. FILTRO FINAL DE CALIDAD
+    Antes de responder, eliminar mentalmente cualquier frase que un analista exigente tacharia por:
+    obvia, generica, intercambiable con cualquier otro brief, o propia de un LLM disciplinado.
 """
 
 CHECK_FINAL = """
-CHECK FINAL (OBLIGATORIO ANTES DE RESPONDER):
-- Algún nivel es imposible dado el precio actual? → corrige.
-- Alguna direccion esta invertida? → corrige.
-- Algun escenario contradice otro? → corrige.
-- Algun numero parece de otro regimen historico? → elimina y recalcula.
+CHECK FINAL (OBLIGATORIO):
+- Algun nivel imposible dado el spot actual? → corregir.
+- Alguna direccion invertida? → corregir.
+- Bear_nivel < Base_nivel < Bull_nivel? → verificar.
+- Algun escenario contradice otro? → corregir.
+- Algun bullet repite una idea ya expresada en este mismo bloque? → eliminar o profundizar.
+- Algun trigger de WWCM hace que la tesis quede MAS justificada? → no es falsacion; reemplazar.
+- Algun contrapeso fue inventado solo para balancear el texto? → eliminar.
+- Algun termino fuerte quedo sin ancla numerica u observable? → corregir.
 """
 
-# ── groq ─────────────────────────────────────────────────────────────────────
+# ── helpers de parsing ───────────────────────────────────────────────────────
+def _parse_interp(interp):
+    """Extrae campos estructurados del texto de interpretacion."""
+    fields = {'REGIMEN': '', 'LECTURA_CENTRAL': '', 'SENALES': '', 'DIVERGENCIAS': ''}
+    if not interp:
+        return fields
+    current = None
+    buf = []
+    for line in interp.split('\n'):
+        s = line.strip()
+        matched = False
+        for key in fields:
+            if s.startswith(key + ':'):
+                if current:
+                    fields[current] = '\n'.join(buf).strip()
+                current = key
+                buf = [s[len(key) + 1:].strip()]
+                matched = True
+                break
+        if not matched and current:
+            buf.append(s)
+    if current:
+        fields[current] = '\n'.join(buf).strip()
+    return fields
+
+
+# ── llm call (Gemini si hay key, sino Groq) ──────────────────────────────────
 def _groq_call(prompt, max_tokens=800):
+    gemini_key = os.environ.get('GEMINI_API_KEY', '')
+    if gemini_key:
+        return _gemini_call(prompt, gemini_key, max_tokens)
+    return _groq_call_impl(prompt, max_tokens)
+
+def _gemini_call(prompt, api_key, max_tokens=800):
+    model = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
+    url   = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}'
+    try:
+        r = requests.post(
+            url,
+            headers={'Content-Type': 'application/json'},
+            json={
+                'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
+                'generationConfig': {
+                    'maxOutputTokens': 8192,
+                    'temperature':     0.3,
+                    'thinkingConfig':  {'thinkingBudget': 0},
+                },
+            },
+            timeout=90,
+        )
+        if not r.ok:
+            print(f'  WARNING Gemini {r.status_code}: {r.text[:200]}')
+            return None
+        candidates = r.json().get('candidates', [])
+        if not candidates:
+            print(f'  WARNING Gemini: no candidates in response')
+            return None
+        # Tomar solo las partes que NO son thinking (thought=True)
+        parts = candidates[0]['content']['parts']
+        text  = ''.join(p['text'] for p in parts if not p.get('thought', False))
+        return text.strip() or None
+    except Exception as e:
+        print(f'  WARNING Gemini: {e}')
+        return None
+
+def _groq_call_impl(prompt, max_tokens=800):
     api_key = os.environ.get('GROQ_API_KEY', '')
     model   = os.environ.get('GROQ_MODEL', 'deepseek-r1-distill-llama-70b')
     if not api_key:
@@ -406,22 +534,23 @@ def build_interpretation(closes, fred, cnn, btc, news, tensions):
     btc_s  = btc.get('score', 'N/D')
     btc_r  = btc.get('rating', '')
 
-    prompt = f"""Eres un analista macro senior. Tu tarea es INTERPRETAR los datos del mercado de hoy \
-y producir una lectura base que sera usada para generar todas las secciones de un reporte financiero \
-de distribucion publica. Es critico que la causa raiz este anclada en datos y noticias concretas.
-{REGLAS_GLOBALES}
-REGLA OBLIGATORIA: cada vez que menciones una variacion porcentual, DEBES especificar el horizonte \
-temporal correspondiente entre parentesis: (1D), (W=5d), (M=21d) o (Q=63d). Ejemplo correcto: \
-"Oil +47.1% (M=21d)". Ejemplo incorrecto: "Oil subio 47%".
-EXCEPCION: el Fear & Greed (CNN F&G, BTC F&G) NO tiene horizonte temporal — NUNCA uses (1D), (W), (M) ni (Q) junto al F&G.
+    prompt = f"""Eres un analista macro senior y editor de market note.
+{REGLAS_CONSISTENCIA}
+{REGLAS_EDITORIALES}
+Objetivo: construir el marco analitico del dia. Identificar el regimen dominante, el o los drivers \
+materiales y la principal divergencia interna del tape. No resumir noticias; sintetizar mercado.
 
-REGLA DE CAUSALIDAD:
-- La CAUSA_RAIZ debe estar respaldada por: (a) al menos 1 dato de mercado Y (b) al menos 1 noticia o indicador macro.
-- Debes mencionar al menos 2 drivers distintos si existen en los datos (geopolitica, tasas/inflacion, dolar/liquidez, credit stress). Ejemplo correcto: "tensiones geopoliticas + presion inflacionaria via petroleo". Si solo hay 1 dominante → justificar explicitamente por que domina.
-- PROHIBIDO reducir todo a geopolitica si los datos muestran multiples presiones simultaneas.
-- Si no hay evidencia suficiente → usar lenguaje probabilistico: "probablemente", "consistente con", "sugiere".
-- PROHIBIDO atribuir TODO a una sola causa sin evidencia clara.
-- PROHIBIDO usar narrativa geopolitica si los activos no lo reflejan claramente.
+Reglas especificas:
+- Ordena drivers por impacto observable en precio, no por narrativa.
+- Un driver requiere evidencia concreta. Un activo estable NO califica como driver.
+- Si solo hay 1 driver material, declararlo y explicar brevemente por que los demas no califican.
+- Buscar activamente el dato que menos encaja con la lectura central.
+- Si no hay divergencia relevante, escribir exactamente: "Sin divergencias relevantes".
+- No usar "causa raiz". No usar verbos genericos salvo con hipotesis + dato + matiz.
+
+REGLA OBLIGATORIA: toda variacion porcentual incluye horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+Ejemplo correcto: "Oil +47.1% (M=21d)". Ejemplo incorrecto: "Oil subio 47%".
+EXCEPCION: CNN F&G y BTC F&G NO tienen horizonte temporal.
 
 DATOS DE MERCADO — {TODAY}
 
@@ -432,7 +561,7 @@ DATOS DE MERCADO — {TODAY}
 {fred_txt}
 Crecimiento: {summarize_growth(fred)} | Liquidez: {summarize_liquidity(fred)} | Credito: {summarize_credit(fred)}
 
-[SENTIMIENTO] (escala 0-100: 0=Panico total, 50=Neutro, 100=Euforia maxima — subir = menos miedo, bajar = mas miedo):
+[SENTIMIENTO] (0=Panico total, 50=Neutro, 100=Euforia maxima — subir = menos miedo, bajar = mas miedo):
 CNN Fear & Greed: {cnn_s}/100 ({cnn_r}) — ZONA: {"panico" if (cnn_s or 50) < 25 else "miedo" if (cnn_s or 50) < 45 else "neutro" if (cnn_s or 50) < 55 else "codicia"}{f', cambio vs ayer: {cnn_ch:+.1f}' if cnn_ch else ''}
 BTC Fear & Greed: {btc_s}/100 ({btc_r})
 
@@ -444,16 +573,22 @@ BTC Fear & Greed: {btc_s}/100 ({btc_r})
 
 Produce la interpretacion con EXACTAMENTE este formato (sin texto antes ni despues):
 
-REGIMEN: [etiqueta corta, ej: "Risk-Off / Inflation Shock"]
+REGIMEN: [max 5 palabras. Formato: postura_de_riesgo / driver_principal.
+La postura es observable en equities+VIX. El driver es el de mayor impacto concreto en precio.
+Ej correcto: "Risk-Off / Oil-Driven Stress". Ej incorrecto: "Mercado en modo defensivo".]
 
-CAUSA_RAIZ: [1-2 oraciones: QUE esta pasando Y POR QUE, citando la noticia o dato concreto]
+LECTURA_CENTRAL: [1-2 oraciones con al menos un dato o numero relevante. Debe decir que esta
+dominando el tape Y que NO esta confirmando del todo, si aplica. Sin "se observa", "refleja", "causa raiz".]
 
 SENALES:
-- [activo] [W/M/Q]: [observacion con numero concreto]
-- [activo] [W/M/Q]: [observacion con numero concreto]
-- [activo] [W/M/Q]: [observacion con numero concreto]
+- Señal 1 — EQUITIES o VOLATILIDAD: [activo] [(horizonte)]: [dato concreto] — [por que importa]
+- Señal 2 — TASAS, CREDITO o COMMODITIES: [activo] [(horizonte)]: [dato concreto] — [por que importa]
+- Señal 3 — SENTIMIENTO, DIVISA o ACTIVO QUE DIVERGE: [activo] [(horizonte)]: [dato concreto] — [que agrega que las otras dos no agregan]
 
-DIVERGENCIAS: [max 2 divergencias notables con numeros. Usa lenguaje preciso y no binario. Ejemplo correcto: "credito no confirma el estres de equities (HY 320bps vs VIX 27)". Ejemplo incorrecto: "HY 320bps → no hay crisis". O escribe "Sin divergencias relevantes"]"""
+DIVERGENCIAS: [el dato que menos encaja con la lectura central, con numero. O "Sin divergencias relevantes".]
+
+Regla critica: las 3 senales deben aportar informacion distinta entre si.
+PROHIBIDO tres senales que digan lo mismo desde tres activos distintos."""
 
     return _groq_call(prompt, max_tokens=600)
 
@@ -474,22 +609,49 @@ def build_tldr(interp, cnn, btc, closes, fred):
         f"DXY (1D): {r1d('DX-Y.NYB')} | USDCLP (1D): {r1d('USDCLP=X')}"
     )
 
-    prompt = f"""Usando esta interpretacion del mercado como base:
+    parsed = _parse_interp(interp)
+    regimen        = parsed['REGIMEN']
+    lectura        = parsed['LECTURA_CENTRAL']
 
-{interp}
-{REGLAS_GLOBALES}
-RETORNOS 1D EXACTOS DE HOY (usa estos numeros exactos — NO los cambies):
+    prompt = f"""Eres un editor de market note.
+{REGLAS_CONSISTENCIA}
+{REGLAS_EDITORIALES}
+Objetivo: entregar en 4 bullets lo unico que el lector debe retener hoy.
+No resumir todo el analisis. Seleccionar y priorizar.
+
+MARCO DEL DIA (referencia — NO reformular, priorizar):
+REGIMEN: {regimen}
+LECTURA_CENTRAL: {lectura}
+
+RETORNOS 1D EXACTOS (usar estos numeros exactos — NO cambiarlos):
 {retornos_1d}
 
-REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
-CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. Bajar = mas miedo. EXCEPCION: el Fear & Greed NO tiene horizonte temporal.
+REGLA OBLIGATORIA: toda variacion porcentual incluye horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+EXCEPCION: Fear & Greed NO tiene horizonte temporal.
+CONTEXTO F&G: 0=Panico total, 100=Euforia maxima. Subir = menos miedo.
 
-REGLA DE PRIORIDAD: el movimiento mas relevante debe ser el de MAYOR magnitud relativa en (1D) O el mas informativo macro (el que mejor explica el regimen). Elige uno y justifica brevemente por que es el mas relevante. No elegir arbitrariamente.
+Reglas especificas:
+- Cada bullet debe introducir una idea distinta.
+- No reformular literalmente la LECTURA_CENTRAL.
+- Bullet 2: movimiento mas informativo macro del dia, no necesariamente el de mayor magnitud.
+  "Mas informativo" = el movimiento que revela algo sobre el regimen que los otros no revelan.
+  PROHIBIDO "confirma", "refleja", "indica", "sugiere" salvo con hipotesis + evidencia + matiz.
+  Ejemplo correcto: "VIX +11.3% (1D) con S&P -0.8%: la demanda por proteccion sube mas rapido que
+  el deterioro del equity — stress latente"
+- Bullet 4: NO es watchlist generica. Es la incertidumbre concreta que el dia dejo abierta.
+  Ejemplo correcto: "Credito no se movio hoy; si HY supera 360bps esta semana, el stress de
+  equities deja de ser aislado."
 
-Genera un TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ".
-Deben cubrir: (1) regimen actual con causa, (2) movimiento mas relevante HOY usando SOLO retorno (1D) exacto, (3) tension o divergencia mas importante, (4) que vigilar esta semana.
+Genera TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ":
+1. Diagnostico del regimen + driver principal, con dato.
+2. Movimiento mas informativo del dia (retorno 1D exacto) + implicancia macro.
+3. Tension o divergencia relevante, con numero.
+4. Incertidumbre concreta que hoy quedo abierta.
+
 Datos adicionales: 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 | BTC F&G {btc.get('score','N/D')}/100
-Sin titulos, sin introduccion, solo los 4 bullets."""
+Sin titulos, sin introduccion, solo los 4 bullets.
+
+Regla critica: TL;DR prioriza. No explica el marco, no proyecta 3 meses y no falsa la tesis."""
 
     return _groq_call(prompt, max_tokens=400)
 
@@ -505,35 +667,60 @@ def build_3m_view(interp, closes, fred):
     dgs10  = fred.get('DGS10',        {}).get('value', 'N/D')
     t5yie  = fred.get('T5YIE',        {}).get('value', 'N/D')
 
-    prompt = f"""Usando esta interpretacion del mercado como base:
+    parsed      = _parse_interp(interp)
+    regimen     = parsed['REGIMEN']
+    lectura     = parsed['LECTURA_CENTRAL']
+    divergencia = parsed['DIVERGENCIAS']
 
-{interp}
-{REGLAS_GLOBALES}
-PRECIOS ACTUALES EXACTOS (ancla para todos tus calculos):
+    prompt = f"""Eres un analista macro senior.
+{REGLAS_CONSISTENCIA}
+{REGLAS_EDITORIALES}
+Objetivo: proyectar la evolucion mas probable del regimen en horizonte de 3 meses.
+Distinguir continuidad, deterioro o alivio/reversion parcial.
+No repetir la tesis del dia; proyectarla.
+
+MARCO ACTUAL (proyectar su evolucion — NO describir de nuevo, sino proyectar):
+REGIMEN: {regimen}
+LECTURA_CENTRAL: {lectura}
+DIVERGENCIAS: {divergencia}
+
+PRECIOS ACTUALES EXACTOS (ancla para todos los calculos):
 S&P 500: {sp_now} | Oil WTI: {oil_now} | HY spread: {hy}% | 10Y: {dgs10}% | Inflacion impl 5Y: {t5yie}%
 
-REGLA CRITICA — ANCLA NUMERICA PARA S&P 500:
-- Nivel actual S&P 500: {sp_now}
-- Una caida de 5% → {f'{sp_now * 0.95:.0f}' if isinstance(sp_now, float) else 'nivel_actual * 0.95'}
-- Una caida de 10% → {f'{sp_now * 0.90:.0f}' if isinstance(sp_now, float) else 'nivel_actual * 0.90'}
-- Una subida de 10% → {f'{sp_now * 1.10:.0f}' if isinstance(sp_now, float) else 'nivel_actual * 1.10'}
-- PROHIBIDO usar niveles recordados o historicos. Si hay duda → usa SOLO % sin nivel absoluto.
+ANCLA NUMERICA S&P 500 (PROHIBIDO usar otros niveles):
+- Nivel actual: {sp_now}
+- Caida 5%  → {f'{sp_now * 0.95:.0f}' if isinstance(sp_now, float) else 'nivel_actual x 0.95'}
+- Caida 10% → {f'{sp_now * 0.90:.0f}' if isinstance(sp_now, float) else 'nivel_actual x 0.90'}
+- Subida 10% → {f'{sp_now * 1.10:.0f}' if isinstance(sp_now, float) else 'nivel_actual x 1.10'}
 
-REGLA para datos historicos: cada variacion porcentual pasada debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
-REGLA para proyecciones: NO uses etiquetas de horizonte. Usa lenguaje temporal: "en 3 meses", "hacia junio".
-REGLA de niveles: usa PORCENTAJES principalmente; niveles absolutos SOLO si son consistentes con el precio actual calculado.
+ESTRUCTURA DE PROBABILIDADES (definir ANTES de escribir los bullets):
+- Base + Bear + Bull = exactamente 100%.
+- Rangos orientativos: Base 50-65%, Bear 15-30%, Bull 10-25%.
+- Elige los tres valores ahora y usalos consistentemente.
 
-REGLAS ADICIONALES PARA ESCENARIOS:
-- Cada escenario DEBE partir desde los PRECIOS ACTUALES EXACTOS provistos arriba.
-- Antes de escribir un nivel: calcula nivel_actual * (1 + % cambio). Si el resultado no tiene sentido → usa solo %.
-- PROHIBIDO: mezclar niveles de otro regimen historico, targets sin base matematica en precios actuales.
+REGLA para retornos historicos: incluir horizonte (1D), (W=5d), (M=21d) o (Q=63d).
+REGLA para proyecciones: lenguaje temporal natural ("en 3 meses", "hacia junio") — PROHIBIDO labels backward.
+REGLA de niveles: usar % principalmente; niveles absolutos SOLO si son matematicamente consistentes con spot.
 
-Genera un 3M VIEW con EXACTAMENTE 5 bullets en espanol, comenzando cada uno con "- ".
-1. Base case (~60%): escenario mas probable con % concretos
-2. Bear case (~20%): que podria salir peor, causa especifica y % de referencia
-3. Bull case (~15%): sorpresa positiva y condicion necesaria concreta
-4. Claves a monitorear: 2-3 indicadores con thresholds binarios claros. Formato: "indicador >X = estres / <Y = normalizacion". Evita rangos vagos como "entre 25-30". Ejemplo correcto: "VIX >32 = capitulacion, VIX <22 = normalizacion".
-5. Implicancias para activos: equities / bonos / oro / crypto / commodities
+Reglas especificas:
+- Cada escenario: trigger distinto, path distinto, nivel o rango distinto.
+- PROHIBIDO tres versiones de intensidad del mismo relato.
+- Si el escenario base incluye alivio o rebote, decir explicitamente si es rebote tecnico,
+  normalizacion parcial o reversion del regimen.
+- Claves a monitorear = thresholds que discriminan entre los 3 escenarios definidos.
+- Implicancias por activo derivadas del escenario BASE.
+  PROHIBIDO cliches automaticos tipo "tech gana / oro neutral / energia pierde" sin mecanismo explicito.
+- La etiqueta del escenario y el path deben conversar entre si.
+
+Genera 3M VIEW con EXACTAMENTE 5 bullets en espanol, comenzando cada uno con "- ":
+1. Base case (XX%): trigger especifico + path + nivel/rango consistente con spot.
+2. Bear case (XX%): trigger distinto al del base + transmision cross-asset + % o nivel desde spot.
+3. Bull case (XX%): condicion concreta + path distinto + nivel/rango. Suma Base+Bear+Bull = 100%.
+   Verificar: Bear_nivel < Base_nivel < Bull_nivel.
+4. Claves: 2-3 thresholds binarios que discriminen entre los 3 escenarios.
+   Formato: "indicador >X = [implicancia concreta] / <Y = [implicancia concreta]".
+5. Implicancias: activo que mas se beneficia (y por que especifico del escenario base) /
+   neutral / mas vulnerable.
 {CHECK_FINAL}
 Sin titulos, sin introduccion, solo los 5 bullets."""
 
@@ -549,28 +736,58 @@ def build_wwcm(interp, tensions, closes, fred):
     hy  = fred.get('BAMLH0A0HYM2', {}).get('value', 'N/D')
     dgs = fred.get('DGS10',        {}).get('value', 'N/D')
 
-    prompt = f"""Usando esta interpretacion del mercado como base:
+    parsed   = _parse_interp(interp)
+    regimen  = parsed['REGIMEN']
+    lectura  = parsed['LECTURA_CENTRAL']
+    senales  = parsed['SENALES']
 
-{interp}
-{REGLAS_GLOBALES}
-PRECIOS ACTUALES (referencia exacta — NO uses otros niveles):
+    prompt = f"""Eres un analista macro senior.
+{REGLAS_CONSISTENCIA}
+{REGLAS_EDITORIALES}
+Objetivo: definir que evidencia concreta invalidaria o debilitaria la lectura central.
+No listar variables importantes. No proyectar. No confirmar la tesis. Solo falsarla.
+
+TESIS Y SENALES VIGENTES (identificar que evidencia las invalidaria — NO reformularlas):
+REGIMEN: {regimen}
+LECTURA_CENTRAL: {lectura}
+SENALES:
+{senales}
+
+PRECIOS ACTUALES (referencia exacta):
 S&P 500: {sp} | VIX: {vix} | Oil WTI: {oil} | HY spread: {hy}% | 10Y Treasury: {dgs}%
 
-REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
-CONTEXTO F&G: escala 0-100 donde 0=Panico total, 100=Euforia maxima. Subir = menos miedo. EXCEPCION: el Fear & Greed NO tiene horizonte temporal.
+REGLA OBLIGATORIA: toda variacion porcentual incluye horizonte (1D), (W=5d), (M=21d) o (Q=63d).
+EXCEPCION: Fear & Greed NO tiene horizonte temporal.
 
-REGLAS PARA UMBRALES:
-- Cada umbral debe ser REALISTA respecto al nivel actual. No puedes usar niveles ya alcanzados como condicion futura.
-- Ejemplo: si Oil = 98, no puedes decir "riesgo si supera 85" (ya fue superado).
-- Usa buffers logicos: cerca = ±5%, significativo = ±10-15%.
-- Cada condicion debe implicar un CAMBIO REAL de regimen, no algo trivial o ya ocurrido.
+DEFINICION OPERATIVA DE FALSACION (critica):
+Un bullet INVALIDA si describe evidencia INCONSISTENTE con el regimen actual.
+Un bullet NO invalida si solo describe una version mas intensa del mismo regimen.
 
-Tensiones detectadas: {tens_txt}
+Ejemplo — Regimen: Risk-Off / Oil-Driven Stress:
+  INVALIDA: "Oil cae >8% sin escalada geopolitica: la causalidad central pierde soporte"
+  NO INVALIDA: "VIX sube a 40: el stress se profundiza" → eso confirma, no falsa.
 
-Genera "WHAT WOULD CHANGE MY MIND" con 4-5 condiciones que cambiarian el regimen actual.
-Bullets en espanol comenzando con "- ". Umbral numerico realista + implicancia para mercados.
+Test obligatorio para cada bullet: si el trigger se cumple y el regimen queda MAS justificado,
+NO es falsacion. Reemplazar por algo que realmente ponga en duda la tesis.
+
+Reglas especificas:
+- La mayoria de bullets debe invalidar o debilitar la tesis.
+- PROHIBIDO triggers que solo intensifican el regimen actual.
+- Debe haber: 1 trigger de precio, 1 de volatilidad o credito (VIX/HY),
+  y 1 cross-asset SOLO si los datos muestran divergencia observable; si no, usar ese slot
+  para el trigger de menor certeza.
+- Si tensiones pre-computadas contradicen LECTURA_CENTRAL, priorizar LECTURA_CENTRAL.
+  Tensiones pre-computadas (dato adicional, no marco): {tens_txt}
+- Cada bullet explica por que ese trigger obliga a revisar la lectura.
+- PROHIBIDO bullets redundantes entre si.
+- PROHIBIDO umbrales ya alcanzados como trigger futuro.
+
+Genera WHAT WOULD CHANGE MY MIND con 4-5 bullets en espanol comenzando con "- ".
+Estructura: [variable] + [umbral numerico] + [por que invalida o debilita la tesis].
 {CHECK_FINAL}
-Sin titulos, sin introduccion, solo los bullets."""
+Sin titulos, sin introduccion, solo los bullets.
+
+Regla critica: WWCM es falsacion real. No mezclar con "what would reinforce the view"."""
 
     return _groq_call(prompt, max_tokens=500)
 
@@ -587,23 +804,40 @@ def build_usdclp_comment(interp, closes):
     cu_q    = _ret(_scalar(cu,  0),   _scalar(cu))  if cu  is not None                    else 'N/D'
     dxy_q   = _ret(_scalar(dxy, 0),   _scalar(dxy)) if dxy is not None                    else 'N/D'
 
-    prompt = f"""Usando esta interpretacion del mercado como base:
+    parsed  = _parse_interp(interp)
+    regimen = parsed['REGIMEN']
 
-{interp}
-{REGLAS_GLOBALES}
-REGLA OBLIGATORIA: cada variacion porcentual debe incluir su horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
+    prompt = f"""Eres un analista de FX con enfoque macro.
+{REGLAS_CONSISTENCIA}
+{REGLAS_EDITORIALES}
+Objetivo: traducir el marco global al USDCLP con foco en drivers observables.
+Priorizar DXY y cobre. Usar riesgo global solo si su efecto es visible en los datos.
 
-REGLA MULTI-FACTOR:
-- Debes considerar al menos 2 factores (DXY + cobre, o riesgo global + cobre).
-- Si los factores son contradictorios → mencionar la tension explicitamente.
-- PROHIBIDO relaciones lineales simplistas tipo "S&P baja → CLP sube" sin matices.
+CONTEXTO DE RIESGO GLOBAL: {regimen}
 
-REGLA TEMPORAL: usa SOLO lenguaje natural para proyecciones ("proximas semanas", "en el corto plazo", "en un mes"). PROHIBIDO usar etiquetas tecnicas (W=5d), (M=21d), (Q=63d) en proyecciones futuras — esas etiquetas son SOLO para retornos historicos pasados.
+REGLA OBLIGATORIA: toda variacion porcentual historica incluye horizonte (1D), (W=5d), (M=21d) o (Q=63d).
+REGLA TEMPORAL: proyecciones en lenguaje natural ("proximas semanas", "en el corto plazo").
+PROHIBIDO etiquetas backward en proyecciones futuras.
 
-Genera un comentario sobre el USDCLP. 2-3 oraciones.
-Datos: USDCLP {clp_now} | Retorno W: {clp_w} | M: {clp_m} | Q: {clp_q} | Cobre Q: {cu_q} | DXY Q: {dxy_q}
-Incluye: nivel actual en contexto, presiones dominantes con al menos 2 factores, direccion esperada en las proximas semanas.
-En espanol, directo al punto, sin titulos."""
+Reglas especificas:
+- Analizar primero DXY y cobre.
+- Riesgo global entra solo si agrega informacion observable sobre USDCLP.
+- Mencionar factor contrario SOLO si existe evidencia en los datos provistos.
+- Si DXY y cobre apuntan en la misma direccion para el par, declararlo como presion unidireccional.
+  Ejemplo: "Presion unidireccional: DXY firme y cobre debil apuntan ambos a depreciacion del CLP."
+- PROHIBIDO inventar contrapesos para balancear el texto.
+- La conclusion debe tener sesgo claro: apreciacion / depreciacion / lateral con sesgo.
+- PROHIBIDO terminar en ambiguedad tipo "dependera" sin razon explicita.
+- No usar "presion alcista/bajista" sin nombrar que factor la genera.
+- Si no existe factor contrario observable, decirlo explicitamente.
+
+Genera comentario USDCLP de 2-3 oraciones en espanol:
+1. Nivel actual en contexto, con referencia historica concreta o comparativa util.
+2. Driver dominante + factor contrario (si existe en los datos) + balance real.
+3. Sesgo de direccion en lenguaje probabilistico pero claro.
+
+Datos: USDCLP {clp_now} | W: {clp_w} | M: {clp_m} | Q: {clp_q} | Cobre Q: {cu_q} | DXY Q: {dxy_q}
+Directo al punto, sin titulos."""
 
     return _groq_call(prompt, max_tokens=300)
 
@@ -800,7 +1034,8 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
 
     # ── Interpretacion base ───────────────────────────────────────────────────
     _LABEL_MAP = {
-        'REGIMEN': 'Régimen', 'CAUSA_RAIZ': 'Causa Raíz',
+        'REGIMEN': 'Régimen', 'CAUSA_RAIZ': 'Lectura Central',
+        'LECTURA_CENTRAL': 'Lectura Central',
         'SENALES': 'Señales', 'DIVERGENCIAS': 'Divergencias',
     }
     pdf.section('[I] INTERPRETACION BASE (*)', min_space=90)

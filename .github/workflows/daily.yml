@@ -31,9 +31,9 @@ jobs:
 
       - name: Run Pipeline 3
         env:
-          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GROQ_MODEL: llama-3.3-70b-versatile
+          FRED_API_KEY:   ${{ secrets.FRED_API_KEY }}
+          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python pipeline3.py
 
       - name: Update briefs.json
