@@ -842,6 +842,35 @@ Directo al punto, sin titulos."""
     return _groq_call(prompt, max_tokens=300)
 
 
+# ── ETAPA 2: Resumen de noticias ──────────────────────────────────────────────
+def build_news_summary(news):
+    if not news:
+        return None
+    articles_txt = '\n'.join(
+        f'[{a["source"]}] {a["title"]} — {a.get("summary","")[:200]}'
+        for a in news[:10]
+    )
+    prompt = f"""Eres un editor de noticias financieras. Sintetiza los articulos en 3 a 5 oraciones en espanol.
+
+Formato de salida OBLIGATORIO:
+- Una oracion por linea.
+- Cada oracion termina con exactamente UNA fuente entre parentesis: (CNBC), (Al Jazeera), (Reuters), etc.
+- Si varias fuentes cubren el mismo hecho, elige la mas relevante — una sola por oracion.
+- No uses (CNBC, Reuters) con multiples fuentes: elige una.
+- Agrupa articulos del mismo tema en una sola oracion.
+- No inventes datos. No uses frases genericas. Tono directo.
+- Sin titulo, sin introduccion, sin numeracion. Solo las oraciones.
+
+Ejemplo de formato correcto:
+Los mercados asiaticos cayeron un 4% ante la escalada en Medio Oriente. (CNBC)
+Iran lanzo ataques con misiles sobre bases israelies cerca de Dimona. (Al Jazeera)
+
+ARTICULOS:
+{articles_txt}"""
+
+    return _groq_call(prompt, max_tokens=400)
+
+
 # ── PDF ───────────────────────────────────────────────────────────────────────
 class PDF(FPDF):
     def __init__(self):
@@ -905,7 +934,7 @@ class PDF(FPDF):
 
 
 def build_pdf(closes, fred, cnn, btc, news, tensions,
-              interp, tldr, v3, wwcm, usdclp_comment):
+              interp, tldr, v3, wwcm, usdclp_comment, news_summary=None):
     pdf = PDF()
     pdf.add_page()
 
@@ -1025,23 +1054,64 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         pdf.ln(1)
 
     # ── Noticias ──────────────────────────────────────────────────────────────
-    pdf.section('[N] NOTICIAS')
-    for a in news[:8]:
-        url = a.get('url', '')
+    pdf.section('[N] NOTICIAS (*)')
+    if news_summary:
+        import re as _re
+        # Build source -> url map (first url per source name)
+        src_url = {}
+        for a in news:
+            key = a['source'].lower()
+            if key not in src_url and a.get('url'):
+                src_url[key] = a['url']
+
+        pdf.set_font('Helvetica', '', 8)
         pdf.set_left_margin(8)
-        pdf.set_x(8)
-        pdf.set_font('Helvetica', 'B', 8)
-        if url:
-            pdf.set_text_color(20, 80, 160)
-        pdf.multi_cell(0, 4.5, clean(f'[{a["source"]}] {a["title"]}'), align='L', link=url)
-        pdf.set_text_color(0, 0, 0)
-        if a.get('summary'):
-            pdf.set_font('Helvetica', '', 8)
+        for line in news_summary.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            # Match a single (Source) at end of line, optionally followed by punctuation
+            m = _re.search(r'\(([^)]+)\)[.,]?\s*$', line)
+            if m:
+                source_name = m.group(1).strip()
+                text_before = line[:m.start()].rstrip()
+                # Find best matching URL
+                url = ''
+                for key, u in src_url.items():
+                    if source_name.lower() in key or key in source_name.lower():
+                        url = u
+                        break
+                pdf.set_x(8)
+                pdf.set_text_color(0, 0, 0)
+                pdf.write(5.2, clean(text_before + ' ('))
+                pdf.set_text_color(20, 80, 160)
+                pdf.write(5.2, clean(source_name), link=url)
+                pdf.set_text_color(0, 0, 0)
+                pdf.write(5.2, clean(')'))
+                pdf.ln(6)
+            else:
+                pdf.set_x(8)
+                pdf.set_text_color(0, 0, 0)
+                pdf.write(5.2, clean(line))
+                pdf.ln(6)
+        pdf.set_left_margin(8)
+    else:
+        for a in news[:8]:
+            url = a.get('url', '')
             pdf.set_left_margin(8)
             pdf.set_x(8)
-            pdf.multi_cell(0, 4, clean(a['summary'][:160]), align='J')
-        pdf.ln(1)
-    pdf.ln(1)
+            pdf.set_font('Helvetica', 'B', 8)
+            if url:
+                pdf.set_text_color(20, 80, 160)
+            pdf.multi_cell(0, 4.5, clean(f'[{a["source"]}] {a["title"]}'), align='L', link=url)
+            pdf.set_text_color(0, 0, 0)
+            if a.get('summary'):
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_left_margin(8)
+                pdf.set_x(8)
+                pdf.multi_cell(0, 4, clean(a['summary'][:160]), align='J')
+            pdf.ln(1)
+    pdf.ln(2)
 
     # ── Interpretacion base ───────────────────────────────────────────────────
     _LABEL_MAP = {
@@ -1189,7 +1259,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
 
 
 # ── Markdown ──────────────────────────────────────────────────────────────────
-def build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment):
+def build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment, news_summary=None):
     now = datetime.now()
     L = []
 
@@ -1224,11 +1294,33 @@ def build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment):
         L += ['', '---', '']
 
     L += ['## [N] NOTICIAS', '']
-    for a in news[:8]:
-        L.append(f'**[{a["source"]}]** {a["title"]}')
-        if a.get('summary'): L.append(f'> {a["summary"][:160]}')
-        L.append('')
-    L += ['---', '']
+    if news_summary:
+        import re as _re
+        src_url = {}
+        for a in news:
+            key = a['source'].lower()
+            if key not in src_url and a.get('url'):
+                src_url[key] = a['url']
+        for line in news_summary.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            def _replace_src(m):
+                name = m.group(1).strip()
+                url = ''
+                for key, u in src_url.items():
+                    if name.lower() in key or key in name.lower():
+                        url = u
+                        break
+                return f'([{name}]({url}))' if url else f'({name})'
+            line_md = _re.sub(r'\(([^)]+)\)([.,]?\s*)$', lambda m2: _replace_src(m2) + m2.group(2), line)
+            L.append(line_md)
+    else:
+        for a in news[:8]:
+            L.append(f'**[{a["source"]}]** {a["title"]}')
+            if a.get('summary'): L.append(f'> {a["summary"][:160]}')
+            L.append('')
+    L += ['', '---', '']
 
     L += ['## [I] INTERPRETACION BASE', '']
     if interp: L.append(interp)
@@ -1320,20 +1412,22 @@ def run():
     wwcm           = build_wwcm(interp, tensions, closes, fred)
     print('  USDCLP...')
     usdclp_comment = build_usdclp_comment(interp, closes)
-    print('  OK — 4 secciones generadas')
+    print('  Noticias...')
+    news_summary   = build_news_summary(news)
+    print('  OK — 5 secciones generadas')
 
     # 4. Output
     stem     = f'{TODAY}_p3'
     md_path  = os.path.join(SUMM_DIR, f'{stem}.md')
     pdf_path = os.path.join(SUMM_DIR, f'{stem}.pdf')
 
-    md = build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment)
+    md = build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment, news_summary=news_summary)
     with open(md_path, 'w', encoding='utf-8') as f:
         f.write(md)
 
     try:
         pdf = build_pdf(closes, fred, cnn, btc, news, tensions,
-                        interp, tldr, v3, wwcm, usdclp_comment)
+                        interp, tldr, v3, wwcm, usdclp_comment, news_summary=news_summary)
         pdf.output(pdf_path)
         print(f'\n  PDF: data/daily_summaries/{stem}.pdf')
     except Exception as e:
