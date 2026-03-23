@@ -1517,18 +1517,24 @@ def run():
         interp = 'Interpretacion no disponible.'
         regime_line = ''
 
+    time.sleep(8)
     # 3. Etapa 2 — Secciones
     print('\n[3/3] Gemini — Etapa 2: Secciones...')
     print('  TL;DR...')
     tldr           = build_tldr(interp, cnn, btc, closes, fred)
+    time.sleep(8)
     print('  3M View...')
     v3             = build_3m_view(interp, closes, fred)
+    time.sleep(8)
     print('  WWCM...')
     wwcm           = build_wwcm(interp, tensions, closes, fred)
+    time.sleep(8)
     print('  USDCLP...')
     usdclp_comment = build_usdclp_comment(interp, closes)
+    time.sleep(8)
     print('  Noticias...')
     news_summary   = build_news_summary(news)
+    time.sleep(8)
     print('  Pase editorial...')
     interp, tldr, v3, wwcm, usdclp_comment = editorial_pass(
         interp, tldr, v3, wwcm, usdclp_comment, closes
