@@ -18,7 +18,7 @@ Output: data/daily_summaries/YYYY-MM-DD_p3.pdf + .md
 import sys, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-import os, json, warnings, requests
+import os, re, json, time, warnings, requests
 from datetime import datetime
 import pandas as pd
 import yfinance as yf
@@ -421,6 +421,28 @@ REGLAS EDITORIALES (OBLIGATORIAS):
     obvia, generica, intercambiable con cualquier otro brief, o propia de un LLM disciplinado.
 """
 
+EJEMPLOS_EDITORIALES = """
+EJEMPLOS CRITICOS — bueno vs malo:
+
+MALO: "lo que sugiere que los inversores estan preocupados por la situacion actual"
+BUENO: eliminar — no agrega dato ni hipotesis accionable
+
+MALO: "podria continuar con un sesgo a la depreciacion en el corto plazo"
+BUENO: "DXY +1.7% (Q) y cobre -3.8% (Q) apuntan en la misma direccion: presion unidireccional a CLP debil"
+
+MALO: "cierta cantidad de inversores que no estan completamente convencidos"
+BUENO: "HY spread estable en 320bps — credito no convalida el panic-buying de puts en VIX"
+
+MALO (en 3M Implicancias): "activo que mas se beneficia: oro (refugio seguro)" cuando oro cae -16% (M)
+BUENO: verificar precios primero — un activo que baja NO puede ser el mas beneficiado del regimen actual
+
+MALO (WWCM): "VIX sube a 40: el stress se profundiza" — confirma, no falsa
+BUENO (WWCM): "VIX cae < 18 en 5D: demanda por proteccion se agota, regimen pierde su senal dominante"
+
+MALO: "en el contexto actual de incertidumbre"
+BUENO: eliminar completamente o reemplazar con el dato especifico que genera esa incertidumbre
+"""
+
 CHECK_FINAL = """
 CHECK FINAL (OBLIGATORIO):
 - Algun nivel imposible dado el spot actual? → corregir.
@@ -466,37 +488,44 @@ def _groq_call(prompt, max_tokens=800):
         return _gemini_call(prompt, gemini_key, max_tokens)
     return _groq_call_impl(prompt, max_tokens)
 
-def _gemini_call(prompt, api_key, max_tokens=800):
-    model = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
+def _gemini_call(prompt, api_key, max_tokens=800, model=None):
+    model = model or os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
     url   = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}'
-    try:
-        r = requests.post(
-            url,
-            headers={'Content-Type': 'application/json'},
-            json={
-                'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
-                'generationConfig': {
-                    'maxOutputTokens': 8192,
-                    'temperature':     0.3,
-                    'thinkingConfig':  {'thinkingBudget': 0},
+    for attempt in range(4):
+        try:
+            r = requests.post(
+                url,
+                headers={'Content-Type': 'application/json'},
+                json={
+                    'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
+                    'generationConfig': {
+                        'maxOutputTokens': 8192,
+                        'temperature':     0.3,
+                        'thinkingConfig':  {'thinkingBudget': 0},
+                    },
                 },
-            },
-            timeout=90,
-        )
-        if not r.ok:
-            print(f'  WARNING Gemini {r.status_code}: {r.text[:200]}')
+                timeout=120,
+            )
+            if r.status_code == 429:
+                wait = 35 * (attempt + 1)
+                print(f'  429 rate limit — esperando {wait}s (intento {attempt+1}/4)...')
+                time.sleep(wait)
+                continue
+            if not r.ok:
+                print(f'  WARNING Gemini {r.status_code}: {r.text[:200]}')
+                return None
+            candidates = r.json().get('candidates', [])
+            if not candidates:
+                print(f'  WARNING Gemini: no candidates in response')
+                return None
+            parts = candidates[0]['content']['parts']
+            text  = ''.join(p['text'] for p in parts if not p.get('thought', False))
+            return text.strip() or None
+        except Exception as e:
+            print(f'  WARNING Gemini: {e}')
             return None
-        candidates = r.json().get('candidates', [])
-        if not candidates:
-            print(f'  WARNING Gemini: no candidates in response')
-            return None
-        # Tomar solo las partes que NO son thinking (thought=True)
-        parts = candidates[0]['content']['parts']
-        text  = ''.join(p['text'] for p in parts if not p.get('thought', False))
-        return text.strip() or None
-    except Exception as e:
-        print(f'  WARNING Gemini: {e}')
-        return None
+    print('  WARNING Gemini: se agotaron los reintentos (429 persistente)')
+    return None
 
 def _groq_call_impl(prompt, max_tokens=800):
     api_key = os.environ.get('GROQ_API_KEY', '')
@@ -537,6 +566,7 @@ def build_interpretation(closes, fred, cnn, btc, news, tensions):
     prompt = f"""Eres un analista macro senior y editor de market note.
 {REGLAS_CONSISTENCIA}
 {REGLAS_EDITORIALES}
+{EJEMPLOS_EDITORIALES}
 Objetivo: construir el marco analitico del dia. Identificar el regimen dominante, el o los drivers \
 materiales y la principal divergencia interna del tape. No resumir noticias; sintetizar mercado.
 
@@ -581,9 +611,16 @@ LECTURA_CENTRAL: [1-2 oraciones con al menos un dato o numero relevante. Debe de
 dominando el tape Y que NO esta confirmando del todo, si aplica. Sin "se observa", "refleja", "causa raiz".]
 
 SENALES:
-- Señal 1 — EQUITIES o VOLATILIDAD: [activo] [(horizonte)]: [dato concreto] — [por que importa]
-- Señal 2 — TASAS, CREDITO o COMMODITIES: [activo] [(horizonte)]: [dato concreto] — [por que importa]
-- Señal 3 — SENTIMIENTO, DIVISA o ACTIVO QUE DIVERGE: [activo] [(horizonte)]: [dato concreto] — [que agrega que las otras dos no agregan]
+- Señal 1 — EQUITIES o VOLATILIDAD: [activo] [(horizonte)]: [dato concreto] — [mecanismo: por que ESTE activo es la senal, no otro]
+- Señal 2 — TASAS, CREDITO o COMMODITIES: [activo] [(horizonte)]: [dato concreto] — [mecanismo: que revela del regimen que la senal 1 no revela]
+- Señal 3 — SENTIMIENTO, DIVISA o ACTIVO QUE DIVERGE: [activo] [(horizonte)]: [dato concreto] — [mecanismo: como esto CONTRADICE o MATIZA las senales 1 y 2]
+
+REGLA CRITICA para [mecanismo]:
+  Responde una de estas preguntas concretas:
+  (a) que umbral o condicion activa este dato?
+  (b) por que este activo especificamente y no otro?
+  (c) que contradiccion interna revela?
+  PROHIBIDO: "muestra alivio", "sugiere preocupacion", "indica riesgo", "implica cautela", "refleja incertidumbre".
 
 DIVERGENCIAS: [el dato que menos encaja con la lectura central, con numero. O "Sin divergencias relevantes".]
 
@@ -616,6 +653,7 @@ def build_tldr(interp, cnn, btc, closes, fred):
     prompt = f"""Eres un editor de market note.
 {REGLAS_CONSISTENCIA}
 {REGLAS_EDITORIALES}
+{EJEMPLOS_EDITORIALES}
 Objetivo: entregar en 4 bullets lo unico que el lector debe retener hoy.
 No resumir todo el analisis. Seleccionar y priorizar.
 
@@ -645,8 +683,15 @@ Reglas especificas:
 Genera TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ":
 1. Diagnostico del regimen + driver principal, con dato.
 2. Movimiento mas informativo del dia (retorno 1D exacto) + implicancia macro.
-3. Tension o divergencia relevante, con numero.
-4. Incertidumbre concreta que hoy quedo abierta.
+3. Tension o divergencia relevante, con numero. DEBE ser una dimension distinta a bullet 2.
+4. Incertidumbre concreta que hoy quedo abierta. DEBE ser distinta a la tension de bullet 3.
+
+REGLA ANTI-SOLAPAMIENTO (critica):
+Antes de escribir bullet N, verificar que su idea central no aparece ya en bullets anteriores.
+Si dos bullets dicen variantes de "el mercado no normalizo completamente", eliminar uno y
+reemplazarlo con una dimension diferente del dia (cross-asset, credito, FX, datos macro).
+Cuatro bullets = cuatro insights distintos. Si no hay cuatro insights reales, el cuarto puede
+ser el mas debil, pero no puede repetir la misma lectura con otras palabras.
 
 Datos adicionales: 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 | BTC F&G {btc.get('score','N/D')}/100
 Sin titulos, sin introduccion, solo los 4 bullets.
@@ -675,6 +720,7 @@ def build_3m_view(interp, closes, fred):
     prompt = f"""Eres un analista macro senior.
 {REGLAS_CONSISTENCIA}
 {REGLAS_EDITORIALES}
+{EJEMPLOS_EDITORIALES}
 Objetivo: proyectar la evolucion mas probable del regimen en horizonte de 3 meses.
 Distinguir continuidad, deterioro o alivio/reversion parcial.
 No repetir la tesis del dia; proyectarla.
@@ -744,6 +790,7 @@ def build_wwcm(interp, tensions, closes, fred):
     prompt = f"""Eres un analista macro senior.
 {REGLAS_CONSISTENCIA}
 {REGLAS_EDITORIALES}
+{EJEMPLOS_EDITORIALES}
 Objetivo: definir que evidencia concreta invalidaria o debilitaria la lectura central.
 No listar variables importantes. No proyectar. No confirmar la tesis. Solo falsarla.
 
@@ -773,9 +820,12 @@ NO es falsacion. Reemplazar por algo que realmente ponga en duda la tesis.
 Reglas especificas:
 - La mayoria de bullets debe invalidar o debilitar la tesis.
 - PROHIBIDO triggers que solo intensifican el regimen actual.
-- Debe haber: 1 trigger de precio, 1 de volatilidad o credito (VIX/HY),
-  y 1 cross-asset SOLO si los datos muestran divergencia observable; si no, usar ese slot
-  para el trigger de menor certeza.
+- Cada bullet ataca una DIMENSION DISTINTA de la tesis:
+    * Precio del driver principal (ej: oil revierte sin razon geopolitica)
+    * Causalidad (ej: el activo clave se mueve pero por driver diferente al asumido)
+    * Cross-asset inconsistente (ej: credito no acompana el rebote de equities)
+    * Sentimiento / posicionamiento (ej: CNN F&G sube rapido sin catalizador claro)
+  PROHIBIDO dos bullets que ataquen la misma dimension con distintos umbrales.
 - Si tensiones pre-computadas contradicen LECTURA_CENTRAL, priorizar LECTURA_CENTRAL.
   Tensiones pre-computadas (dato adicional, no marco): {tens_txt}
 - Cada bullet explica por que ese trigger obliga a revisar la lectura.
@@ -810,6 +860,7 @@ def build_usdclp_comment(interp, closes):
     prompt = f"""Eres un analista de FX con enfoque macro.
 {REGLAS_CONSISTENCIA}
 {REGLAS_EDITORIALES}
+{EJEMPLOS_EDITORIALES}
 Objetivo: traducir el marco global al USDCLP con foco en drivers observables.
 Priorizar DXY y cobre. Usar riesgo global solo si su efecto es visible en los datos.
 
@@ -842,28 +893,112 @@ Directo al punto, sin titulos."""
     return _groq_call(prompt, max_tokens=300)
 
 
+# ── Pase editorial ────────────────────────────────────────────────────────────
+def editorial_pass(interp, tldr, v3, wwcm, clp_comment, closes):
+    """Segunda llamada a Gemini como editor: elimina lenguaje generico y corrige contradicciones cross-seccion."""
+    api_key = os.environ.get('GEMINI_API_KEY', '')
+    if not api_key:
+        return interp, tldr, v3, wwcm, clp_comment
+
+    macro_txt = format_macro_summary(closes)
+
+    sections_txt = f"""===INTERPRETACION===
+{interp or ''}
+
+===TLDR===
+{tldr or ''}
+
+===3M_VIEW===
+{v3 or ''}
+
+===WWCM===
+{wwcm or ''}
+
+===CLP===
+{clp_comment or ''}"""
+
+    prompt = f"""Eres un editor senior de market notes. Tu tarea: revisar y corregir estas secciones.
+NO cambies estructura, formato ni numeros. Solo mejora el texto donde viola las reglas.
+
+DATOS DE MERCADO (usa para verificar hechos):
+{macro_txt}
+
+{REGLAS_EDITORIALES}
+{EJEMPLOS_EDITORIALES}
+
+TAREAS ESPECIFICAS:
+1. LENGUAJE GENERICO: Reescribir o eliminar frases que puedan aparecer en cualquier brief de cualquier dia.
+   Ejemplos prohibidos: "lo que sugiere que los inversores estan preocupados", "en el contexto actual",
+   "cierta cantidad de", "podria continuar con un sesgo", "es probable que".
+   Reemplazar por dato + mecanismo concreto, o eliminar si no aporta.
+
+2. CONTRADICCIONES CROSS-SECCION: Un activo con caida pronunciada en precios NO puede ser el "mas
+   beneficiado" en 3M Implicancias. Verificar consistencia entre todas las secciones.
+
+3. WWCM FALSACION REAL: Todo bullet de WWCM debe hacer la tesis MENOS justificada, no mas intensa.
+   Si un bullet confirma el regimen en vez de falsarlo, reescribirlo.
+
+4. CLP CONCLUSION CONCRETA: La conclusion del CLP debe tener sesgo claro con mecanismo.
+   PROHIBIDO terminar con "dependera de" o "sesgo a la depreciacion en el corto plazo" sin ancla.
+
+SECCIONES A EDITAR:
+{sections_txt}
+
+Responde EXACTAMENTE en este formato (sin texto antes ni despues de los delimitadores):
+===INTERPRETACION===
+[interpretacion corregida]
+===TLDR===
+[tldr corregido]
+===3M_VIEW===
+[3m view corregido]
+===WWCM===
+[wwcm corregido]
+===CLP===
+[clp corregido]
+===FIN==="""
+
+    result = _gemini_call(prompt, api_key, max_tokens=4000, model='gemini-2.5-flash')
+    if not result:
+        return interp, tldr, v3, wwcm, clp_comment
+
+    def _extract(tag, text):
+        m = re.search(rf'==={tag}===\s*(.*?)(?=(?:===\w|===FIN===))', text, re.DOTALL)
+        return m.group(1).strip() if m else None
+
+    return (
+        _extract('INTERPRETACION', result) or interp,
+        _extract('TLDR',           result) or tldr,
+        _extract('3M_VIEW',        result) or v3,
+        _extract('WWCM',           result) or wwcm,
+        _extract('CLP',            result) or clp_comment,
+    )
+
+
 # ── ETAPA 2: Resumen de noticias ──────────────────────────────────────────────
 def build_news_summary(news):
     if not news:
         return None
     articles_txt = '\n'.join(
-        f'[{a["source"]}] {a["title"]} — {a.get("summary","")[:200]}'
-        for a in news[:10]
+        f'[{i+1}] [{a["source"]}] {a["title"]} — {a.get("summary","")[:200]}'
+        for i, a in enumerate(news[:10])
     )
     prompt = f"""Eres un editor de noticias financieras. Sintetiza los articulos en 3 a 5 oraciones en espanol.
 
+JERARQUIA OBLIGATORIA (orden de aparicion):
+1. Primero: lo que movio precios de activos (equities, petroleo, tasas, FX) — con el dato concreto.
+2. Segundo: catalizador geopolitico o macro que explica ese movimiento.
+3. Tercero: contexto adicional relevante, solo si aporta algo nuevo.
+
 Formato de salida OBLIGATORIO:
 - Una oracion por linea.
-- Cada oracion termina con exactamente UNA fuente entre parentesis: (CNBC), (Al Jazeera), (Reuters), etc.
-- Si varias fuentes cubren el mismo hecho, elige la mas relevante — una sola por oracion.
-- No uses (CNBC, Reuters) con multiples fuentes: elige una.
-- Agrupa articulos del mismo tema en una sola oracion.
-- No inventes datos. No uses frases genericas. Tono directo.
-- Sin titulo, sin introduccion, sin numeracion. Solo las oraciones.
+- Cada oracion termina con el NUMERO del articulo fuente entre parentesis: (1), (3), etc.
+- Si varios articulos cubren el mismo hecho, elige el mas relevante — EXACTAMENTE un numero por oracion, nunca (5, 10).
+- Agrupa articulos del mismo tema en UNA sola oracion — no repitas el mismo hecho en dos lineas.
+- No inventes datos. Tono directo. Sin frases genericas. Sin titulo ni introduccion.
 
-Ejemplo de formato correcto:
-Los mercados asiaticos cayeron un 4% ante la escalada en Medio Oriente. (CNBC)
-Iran lanzo ataques con misiles sobre bases israelies cerca de Dimona. (Al Jazeera)
+Ejemplo correcto:
+El petroleo cayo -10% tras la pausa de Trump en ataques a Iran (3).
+El CEO de Chevron advirtio que el mercado no ha procesado completamente el shock de oferta (1).
 
 ARTICULOS:
 {articles_txt}"""
@@ -970,7 +1105,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     close_date = (yesterday - timedelta(days=delta)).strftime('%d/%m/%Y')
     disclaimer_text = (
         f'Todos los precios y retornos corresponden al cierre de mercado del {close_date}. '
-        f'La interpretacion de los datos es generada automaticamente por un modelo de inteligencia artificial (Gemini 2.5 Flash) que puede cometer errores. '
+        f'La interpretacion de los datos es generada automaticamente por un modelo de inteligencia artificial (Gemini 2.5 Pro) que puede cometer errores. '
         f'Este reporte es de caracter informativo y educativo. '
         f'No constituye asesoramiento financiero ni una recomendacion de inversion. '
         f'Vista Macro no se responsabiliza por decisiones tomadas en base a este contenido.'
@@ -1056,13 +1191,8 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     # ── Noticias ──────────────────────────────────────────────────────────────
     pdf.section('[N] NOTICIAS (*)')
     if news_summary:
-        import re as _re
-        # Build source -> url map (first url per source name)
-        src_url = {}
-        for a in news:
-            key = a['source'].lower()
-            if key not in src_url and a.get('url'):
-                src_url[key] = a['url']
+        # Build index -> (source_name, url) map  (1-based)
+        idx_map = {i+1: (a['source'], a.get('url', '')) for i, a in enumerate(news[:10])}
 
         pdf.set_font('Helvetica', '', 8)
         pdf.set_left_margin(8)
@@ -1070,22 +1200,16 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
             line = line.strip()
             if not line:
                 continue
-            # Match a single (Source) at end of line, optionally followed by punctuation
-            m = _re.search(r'\(([^)]+)\)[.,]?\s*$', line)
+            m = re.search(r'\((\d+)(?:[^)]*)\)[.,]?\s*$', line)
             if m:
-                source_name = m.group(1).strip()
+                idx         = int(m.group(1))
                 text_before = line[:m.start()].rstrip()
-                # Find best matching URL
-                url = ''
-                for key, u in src_url.items():
-                    if source_name.lower() in key or key in source_name.lower():
-                        url = u
-                        break
+                src_name, url = idx_map.get(idx, ('?', ''))
                 pdf.set_x(8)
                 pdf.set_text_color(0, 0, 0)
                 pdf.write(5.2, clean(text_before + ' ('))
                 pdf.set_text_color(20, 80, 160)
-                pdf.write(5.2, clean(source_name), link=url)
+                pdf.write(5.2, clean(src_name), link=url)
                 pdf.set_text_color(0, 0, 0)
                 pdf.write(5.2, clean(')'))
                 pdf.ln(6)
@@ -1295,25 +1419,16 @@ def build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment, new
 
     L += ['## [N] NOTICIAS', '']
     if news_summary:
-        import re as _re
-        src_url = {}
-        for a in news:
-            key = a['source'].lower()
-            if key not in src_url and a.get('url'):
-                src_url[key] = a['url']
+        idx_map = {i+1: (a['source'], a.get('url', '')) for i, a in enumerate(news[:10])}
         for line in news_summary.split('\n'):
             line = line.strip()
             if not line:
                 continue
-            def _replace_src(m):
-                name = m.group(1).strip()
-                url = ''
-                for key, u in src_url.items():
-                    if name.lower() in key or key in name.lower():
-                        url = u
-                        break
-                return f'([{name}]({url}))' if url else f'({name})'
-            line_md = _re.sub(r'\(([^)]+)\)([.,]?\s*)$', lambda m2: _replace_src(m2) + m2.group(2), line)
+            def _replace_idx(m, _idx_map=idx_map):
+                idx = int(m.group(1))
+                src_name, url = _idx_map.get(idx, ('?', ''))
+                return f'([{src_name}]({url}))' if url else f'({src_name})'
+            line_md = re.sub(r'\((\d+)(?:[^)]*)\)([.,]?\s*)$', lambda m2: _replace_idx(m2) + m2.group(2), line)
             L.append(line_md)
     else:
         for a in news[:8]:
@@ -1414,7 +1529,11 @@ def run():
     usdclp_comment = build_usdclp_comment(interp, closes)
     print('  Noticias...')
     news_summary   = build_news_summary(news)
-    print('  OK — 5 secciones generadas')
+    print('  Pase editorial...')
+    interp, tldr, v3, wwcm, usdclp_comment = editorial_pass(
+        interp, tldr, v3, wwcm, usdclp_comment, closes
+    )
+    print('  OK — 5 secciones generadas + pase editorial')
 
     # 4. Output
     stem     = f'{TODAY}_p3'
