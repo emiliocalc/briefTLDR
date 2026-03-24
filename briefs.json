@@ -1,12 +1,20 @@
 [
   {
+    "date": "2026-03-24",
+    "pdf": "data/daily_summaries/2026-03-24_p3.pdf",
+    "md": "data/daily_summaries/2026-03-24_p3.md",
+    "chart": "data/daily_summaries/2026-03-24_chart.json"
+  },
+  {
     "date": "2026-03-23",
     "pdf": "data/daily_summaries/2026-03-23_p3.pdf",
-    "md": "data/daily_summaries/2026-03-23_p3.md"
+    "md": "data/daily_summaries/2026-03-23_p3.md",
+    "chart": null
   },
   {
     "date": "2026-03-22",
     "pdf": "data/daily_summaries/2026-03-22_p3.pdf",
-    "md": "data/daily_summaries/2026-03-22_p3.md"
-  },
+    "md": "data/daily_summaries/2026-03-22_p3.md",
+    "chart": null
+  }
 ]
