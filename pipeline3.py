@@ -16,7 +16,7 @@ Output: data/daily_summaries/YYYY-MM-DD_p3.pdf + .md
 """
 
 import sys, io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 import os, re, json, time, warnings, requests
 from datetime import datetime
@@ -489,7 +489,7 @@ def _groq_call(prompt, max_tokens=800):
     return _groq_call_impl(prompt, max_tokens)
 
 def _gemini_call(prompt, api_key, max_tokens=800, model=None):
-    model = model or os.environ.get('GEMINI_MODEL', 'gemini-2.5-pro')
+    model = model or os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
     url   = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}'
     for attempt in range(4):
         try:
