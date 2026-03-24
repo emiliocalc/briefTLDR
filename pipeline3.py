@@ -982,7 +982,9 @@ def build_news_summary(news):
         f'[{i+1}] [{a["source"]}] {a["title"]} — {a.get("summary","")[:200]}'
         for i, a in enumerate(news[:10])
     )
-    prompt = f"""Eres un editor de noticias financieras. Sintetiza los articulos en 3 a 5 oraciones en espanol.
+    prompt = f"""Eres un editor de noticias financieras. Sintetiza los articulos en 3 a 5 oraciones en ESPANOL NEUTRO.
+CRITICO: Todo el output debe estar en español neutro, sin excepcion. Traduce cualquier contenido en ingles.
+No uses palabras en ingles salvo nombres propios inevitables (nombres de personas, empresas, indices).
 
 JERARQUIA OBLIGATORIA (orden de aparicion):
 1. Primero: lo que movio precios de activos (equities, petroleo, tasas, FX) — con el dato concreto.
