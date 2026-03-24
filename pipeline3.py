@@ -222,12 +222,20 @@ def get_btc_fg():
 def get_news(max_items=10):
     seen = set()
     per_source = []  # lista de (score, article) por fuente, luego merge
+    today_date = datetime.strptime(TODAY, '%Y-%m-%d').date()
 
     for source, url in NEWS_FEEDS:
         source_articles = []
         try:
             feed = feedparser.parse(url)
             for e in feed.entries[:20]:
+                # Filtrar solo artículos del día de hoy
+                pub = e.get('published_parsed') or e.get('updated_parsed')
+                if pub:
+                    from calendar import timegm
+                    pub_date = datetime.utcfromtimestamp(timegm(pub)).date()
+                    if pub_date != today_date:
+                        continue
                 title = e.get('title', '').strip()
                 key   = title.lower()[:60]
                 if key in seen:
@@ -238,13 +246,12 @@ def get_news(max_items=10):
                     continue
                 score = sum(1 for kw in NEWS_KEYWORDS if kw in combined)
                 source_articles.append({'title': title, 'source': source,
-                                        'summary': e.get('summary', '')[:200],
+                                        'summary': e.get('summary', '')[:400],
                                         'score': score, 'url': e.get('link', '')})
         except Exception:
             continue
-        # Tomar el mejor artículo de cada fuente (garantiza diversidad)
         source_articles.sort(key=lambda x: x['score'], reverse=True)
-        per_source.extend(source_articles[:2])  # máx 2 por fuente
+        per_source.extend(source_articles)
 
     # Rankear el pool diversificado y devolver top N
     per_source.sort(key=lambda x: x['score'], reverse=True)
