@@ -49,10 +49,12 @@ jobs:
               m = re.match(r"(\d{4}-\d{2}-\d{2})_p3\.pdf", p.name)
               if m:
                   date = m.group(1)
+                  chart_path = f"data/daily_summaries/{date}_chart.json"
                   briefs.append({
-                      "date": date,
-                      "pdf":  f"data/daily_summaries/{date}_p3.pdf",
-                      "md":   f"data/daily_summaries/{date}_p3.md"
+                      "date":  date,
+                      "pdf":   f"data/daily_summaries/{date}_p3.pdf",
+                      "md":    f"data/daily_summaries/{date}_p3.md",
+                      "chart": chart_path if Path(chart_path).exists() else None
                   })
           with open("briefs.json", "w") as f:
               json.dump(briefs, f, indent=2)
@@ -63,6 +65,6 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/daily_summaries/*_p3.pdf data/daily_summaries/*_p3.md briefs.json data/cnn_fg_cache.json || true
+          git add data/daily_summaries/*_p3.pdf data/daily_summaries/*_p3.md data/daily_summaries/*_chart.json briefs.json data/cnn_fg_cache.json || true
           git diff --cached --quiet || git commit -m "brief $(date +%Y-%m-%d)"
           git push

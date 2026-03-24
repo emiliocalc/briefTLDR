@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>The Global Compounder — Macro Brief</title>
+  <title>Vista Macro — Macro Brief</title>
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -26,17 +27,8 @@
       flex-shrink: 0;
     }
 
-    header h1 {
-      font-size: 15px;
-      font-weight: 600;
-      color: #fff;
-      letter-spacing: 0.3px;
-    }
-
-    header span {
-      font-size: 12px;
-      color: #666;
-    }
+    header h1 { font-size: 15px; font-weight: 600; color: #fff; letter-spacing: 0.3px; }
+    header span { font-size: 12px; color: #666; }
 
     .layout {
       display: flex;
@@ -75,28 +67,10 @@
       gap: 2px;
     }
 
-    .brief-item:hover {
-      background: #1a1a26;
-      color: #ddd;
-    }
-
-    .brief-item.active {
-      background: #1a1a2e;
-      color: #fff;
-      border-left-color: #5a7fff;
-    }
-
-    .brief-item .date {
-      font-size: 13px;
-      font-weight: 500;
-    }
-
-    .brief-item .tag {
-      font-size: 10px;
-      color: #5a7fff;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-    }
+    .brief-item:hover { background: #1a1a26; color: #ddd; }
+    .brief-item.active { background: #1a1a2e; color: #fff; border-left-color: #5a7fff; }
+    .brief-item .date { font-size: 13px; font-weight: 500; }
+    .brief-item .tag { font-size: 10px; color: #5a7fff; font-weight: 600; letter-spacing: 0.5px; }
 
     /* Viewer */
     .viewer {
@@ -116,10 +90,7 @@
       flex-shrink: 0;
     }
 
-    .viewer-bar span {
-      font-size: 12px;
-      color: #666;
-    }
+    .viewer-bar span { font-size: 12px; color: #666; }
 
     .viewer-bar a {
       font-size: 12px;
@@ -131,9 +102,52 @@
       transition: all 0.15s;
     }
 
-    .viewer-bar a:hover {
-      background: #5a7fff;
-      color: #fff;
+    .viewer-bar a:hover { background: #5a7fff; color: #fff; }
+
+    /* Chart panel */
+    .chart-panel {
+      background: #111118;
+      border-bottom: 1px solid #2a2a3a;
+      padding: 12px 16px 8px;
+      flex-shrink: 0;
+      display: none;
+    }
+
+    .chart-panel.visible { display: block; }
+
+    .chart-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: #555;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    #chart-container {
+      width: 100%;
+      height: 200px;
+    }
+
+    .chart-legend {
+      display: flex;
+      gap: 14px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: #888;
+    }
+
+    .legend-dot {
+      width: 20px;
+      height: 2px;
+      border-radius: 1px;
     }
 
     iframe {
@@ -157,7 +171,7 @@
       .layout { flex-direction: column; }
       .sidebar {
         width: 100%;
-        height: 120px;
+        height: 110px;
         border-right: none;
         border-bottom: 1px solid #2a2a3a;
         display: flex;
@@ -175,10 +189,8 @@
         min-width: 90px;
         text-align: center;
       }
-      .brief-item.active {
-        border-left-color: transparent;
-        border-bottom-color: #5a7fff;
-      }
+      .brief-item.active { border-left-color: transparent; border-bottom-color: #5a7fff; }
+      #chart-container { height: 160px; }
     }
   </style>
   <script defer src="/_vercel/insights/script.js"></script>
@@ -186,7 +198,7 @@
 <body>
 
 <header>
-  <h1>The Global Compounder</h1>
+  <h1>Vista Macro</h1>
   <span>Macro Brief — Daily</span>
 </header>
 
@@ -201,13 +213,117 @@
       <span id="current-label">Selecciona un reporte</span>
       <a id="download-link" href="#" style="display:none" download>Descargar PDF</a>
     </div>
-    <div id="frame-container" class="empty">
-      Cargando reportes...
+
+    <!-- Chart panel -->
+    <div class="chart-panel" id="chart-panel">
+      <div class="chart-title">Cross-Asset Performance — 21D (base 0%)</div>
+      <div id="chart-container"></div>
+      <div class="chart-legend" id="chart-legend"></div>
     </div>
+
+    <div id="frame-container" class="empty">Cargando reportes...</div>
   </div>
 </div>
 
 <script>
+  let chartInstance = null;
+
+  function initChart() {
+    const container = document.getElementById('chart-container');
+    chartInstance = LightweightCharts.createChart(container, {
+      layout: {
+        background: { color: '#111118' },
+        textColor: '#888',
+        fontSize: 10,
+      },
+      grid: {
+        vertLines: { color: '#1e1e2a' },
+        horzLines: { color: '#1e1e2a' },
+      },
+      rightPriceScale: {
+        borderColor: '#2a2a3a',
+        ticksVisible: true,
+      },
+      timeScale: {
+        borderColor: '#2a2a3a',
+        tickMarkFormatter: (time) => {
+          const d = new Date(time * 1000);
+          return `${d.getDate()}/${d.getMonth()+1}`;
+        },
+      },
+      crosshair: {
+        vertLine: { color: '#444', width: 1, style: 3 },
+        horzLine: { color: '#444', width: 1, style: 3 },
+      },
+      handleScroll: false,
+      handleScale: false,
+      width: container.clientWidth,
+      height: container.clientHeight,
+    });
+
+    // Resize observer
+    new ResizeObserver(() => {
+      chartInstance.applyOptions({ width: container.clientWidth });
+    }).observe(container);
+  }
+
+  async function loadChart(chartUrl) {
+    const panel = document.getElementById('chart-panel');
+    const legend = document.getElementById('chart-legend');
+
+    if (!chartUrl) { panel.classList.remove('visible'); return; }
+
+    try {
+      const res  = await fetch(chartUrl);
+      const data = await res.json();
+
+      panel.classList.add('visible');
+
+      if (!chartInstance) initChart();
+
+      // Limpiar series anteriores
+      chartInstance.removeSeries && chartInstance.getSeries && chartInstance.getSeries().forEach(s => chartInstance.removeSeries(s));
+
+      // Recrear chart limpio
+      const container = document.getElementById('chart-container');
+      if (chartInstance) { chartInstance.remove(); chartInstance = null; }
+      initChart();
+
+      legend.innerHTML = '';
+
+      data.series.forEach(s => {
+        const series = chartInstance.addLineSeries({
+          color: s.color,
+          lineWidth: 1.5,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          crosshairMarkerVisible: true,
+          title: '',
+          priceFormat: { type: 'custom', formatter: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%' },
+        });
+
+        // Convertir time strings a timestamps
+        const formatted = s.data.map(d => ({
+          time: Math.floor(new Date(d.time).getTime() / 1000),
+          value: d.value,
+        }));
+        series.setData(formatted);
+
+        // Leyenda
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `<div class="legend-dot" style="background:${s.color}"></div><span>${s.name}</span>`;
+        legend.appendChild(item);
+      });
+
+      chartInstance.timeScale().fitContent();
+
+    } catch(e) {
+      console.warn('Chart load error:', e);
+      panel.classList.remove('visible');
+    }
+  }
+
   async function loadBriefs() {
     let briefs = [];
     try {
@@ -250,6 +366,8 @@
     container.style.flex = '1';
     container.style.display = 'flex';
     container.innerHTML = `<iframe src="${b.pdf}"></iframe>`;
+
+    loadChart(b.chart || null);
   }
 
   loadBriefs();

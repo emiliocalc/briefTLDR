@@ -19,6 +19,10 @@ import sys, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 import os, re, json, time, warnings, requests
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 from datetime import datetime
 import pandas as pd
 import yfinance as yf
@@ -577,6 +581,8 @@ Reglas especificas:
 - Buscar activamente el dato que menos encaja con la lectura central.
 - Si no hay divergencia relevante, escribir exactamente: "Sin divergencias relevantes".
 - No usar "causa raiz". No usar verbos genericos salvo con hipotesis + dato + matiz.
+- PROHIBIDO usar "divergencia", "resiliencia", "presion", "normalizacion" o "capitulacion" sin describir
+  explicitamente entre que variables ocurre y por que importa en el contexto del regimen actual.
 
 REGLA OBLIGATORIA: toda variacion porcentual incluye horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
 Ejemplo correcto: "Oil +47.1% (M=21d)". Ejemplo incorrecto: "Oil subio 47%".
@@ -650,53 +656,97 @@ def build_tldr(interp, cnn, btc, closes, fred):
     regimen        = parsed['REGIMEN']
     lectura        = parsed['LECTURA_CENTRAL']
 
+    datos_adicionales = (
+        f"10Y: {dgs10}% | S&P Q: {sp_q} | "
+        f"CNN F&G: {cnn.get('score','N/D')}/100 | BTC F&G: {btc.get('score','N/D')}/100"
+    )
+
     prompt = f"""Eres un editor de market note.
 {REGLAS_CONSISTENCIA}
 {REGLAS_EDITORIALES}
 {EJEMPLOS_EDITORIALES}
-Objetivo: entregar en 4 bullets lo unico que el lector debe retener hoy.
-No resumir todo el analisis. Seleccionar y priorizar.
 
-MARCO DEL DIA (referencia — NO reformular, priorizar):
+Objetivo: entregar en 4 bullets lo unico que el lector debe retener hoy.
+No resumir todo el analisis. Seleccionar, jerarquizar y descartar.
+
+MARCO DEL DIA (referencia — NO reformular ni parafrasear de forma perezosa):
 REGIMEN: {regimen}
 LECTURA_CENTRAL: {lectura}
 
 RETORNOS 1D EXACTOS (usar estos numeros exactos — NO cambiarlos):
 {retornos_1d}
 
+DATOS ADICIONALES (usar SOLO si agregan informacion nueva):
+{datos_adicionales}
+
 REGLA OBLIGATORIA: toda variacion porcentual incluye horizonte: (1D), (W=5d), (M=21d) o (Q=63d).
 EXCEPCION: Fear & Greed NO tiene horizonte temporal.
 CONTEXTO F&G: 0=Panico total, 100=Euforia maxima. Subir = menos miedo.
 
 Reglas especificas:
-- Cada bullet debe introducir una idea distinta.
-- No reformular literalmente la LECTURA_CENTRAL.
-- Bullet 2: movimiento mas informativo macro del dia, no necesariamente el de mayor magnitud.
-  "Mas informativo" = el movimiento que revela algo sobre el regimen que los otros no revelan.
+- Cada bullet debe aportar una idea central distinta.
+- PROHIBIDO reformular o parafrasear la LECTURA_CENTRAL en otros terminos.
+- PROHIBIDO listar 4 observaciones del mercado sin jerarquia.
+- TL;DR prioriza: debe decir que importa mas, que tension limita la lectura y que pregunta sigue abierta.
+
+- Bullet 1:
+  diagnostico del regimen + driver principal con dato.
+  Debe decir que domina hoy, no repetir el marco.
+  PROHIBIDO abrir con "El regimen de..." ni repetir literalmente la etiqueta REGIMEN.
+  Traducir el marco a una conclusion editorial del dia usando datos, no reescribir la etiqueta.
+  PROHIBIDO lenguaje vacio tipo "aversion al riesgo", "incertidumbre", "volatilidad elevada" sin mecanismo o dato.
+
+- Bullet 2:
+  movimiento mas informativo macro del dia, no necesariamente el de mayor magnitud.
+  "Mas informativo" = el movimiento que cambia mas la lectura del regimen frente a los otros.
+  Debe incluir: retorno exacto (1D) + por que ese movimiento revela algo que otro activo no revela hoy.
   PROHIBIDO "confirma", "refleja", "indica", "sugiere" salvo con hipotesis + evidencia + matiz.
-  Ejemplo correcto: "VIX +11.3% (1D) con S&P -0.8%: la demanda por proteccion sube mas rapido que
-  el deterioro del equity — stress latente"
-- Bullet 4: NO es watchlist generica. Es la incertidumbre concreta que el dia dejo abierta.
-  Ejemplo correcto: "Credito no se movio hoy; si HY supera 360bps esta semana, el stress de
-  equities deja de ser aislado."
+  Ejemplo correcto:
+  "VIX +11.3% (1D) con S&P -0.8%: la demanda por proteccion sube mas rapido que el deterioro del equity — stress latente"
+
+- Bullet 3:
+  tension o divergencia relevante, con numero.
+  Debe ser una dimension distinta a bullet 2.
+  Solo usar una tension si limita la conviccion del diagnostico o evita una lectura demasiado limpia.
+  PROHIBIDO divergencias decorativas.
+  Si no hay tension relevante, escribir una ausencia significativa con numero.
+  Ejemplo:
+  "HY en 320bps hoy: el stress sigue en equity/volatilidad, no en credito."
+
+- Bullet 4:
+  incertidumbre concreta que hoy quedo abierta.
+  NO es watchlist generica.
+  NO es proyeccion a 3 meses.
+  NO es falsacion de tesis.
+  Debe nacer de una inconsistencia observada HOY entre activos — no de una variable importante en abstracto.
+  Si puede sonar a watchlist semanal generica, reescribir.
+  Debe formular una pregunta no resuelta que nace de los datos de hoy, y que podria cambiar la lectura de corto plazo si se despeja.
+  Ejemplo correcto:
+  "Credito no se movio hoy; si HY supera 360bps esta semana, el stress de equities deja de ser aislado."
+
+REGLA ANTI-SOLAPAMIENTO (critica):
+Antes de escribir bullet N, verificar que su idea central no aparece ya en bullets anteriores.
+Si un bullet repite la misma insight con otras palabras, reescribir.
+
+REGLA DE LONGITUD:
+Cada bullet debe poder leerse en una sola exhalacion. Si supera ~28-32 palabras, condensar.
+Priorizar filo editorial sobre explicacion completa.
+
+REGLA DE CALIDAD:
+Si un bullet puede aparecer en cualquier newsletter financiera cambiando solo los numeros, reescribirlo.
+Si un bullet explica en vez de priorizar, recortarlo.
+Si un bullet suena a comentario generico de mercado, endurecerlo.
 
 Genera TL;DR de EXACTAMENTE 4 bullets en espanol, comenzando cada uno con "- ":
 1. Diagnostico del regimen + driver principal, con dato.
 2. Movimiento mas informativo del dia (retorno 1D exacto) + implicancia macro.
-3. Tension o divergencia relevante, con numero. DEBE ser una dimension distinta a bullet 2.
-4. Incertidumbre concreta que hoy quedo abierta. DEBE ser distinta a la tension de bullet 3.
+3. Tension o divergencia relevante, con numero.
+4. Incertidumbre concreta que hoy quedo abierta.
 
-REGLA ANTI-SOLAPAMIENTO (critica):
-Antes de escribir bullet N, verificar que su idea central no aparece ya en bullets anteriores.
-Si dos bullets dicen variantes de "el mercado no normalizo completamente", eliminar uno y
-reemplazarlo con una dimension diferente del dia (cross-asset, credito, FX, datos macro).
-Cuatro bullets = cuatro insights distintos. Si no hay cuatro insights reales, el cuarto puede
-ser el mas debil, pero no puede repetir la misma lectura con otras palabras.
-
-Datos adicionales: 10Y {dgs10}% | S&P Q {sp_q} | CNN F&G {cnn.get('score','N/D')}/100 | BTC F&G {btc.get('score','N/D')}/100
 Sin titulos, sin introduccion, solo los 4 bullets.
 
-Regla critica: TL;DR prioriza. No explica el marco, no proyecta 3 meses y no falsa la tesis."""
+Regla critica final:
+TL;DR prioriza. No explica el marco, no proyecta 3 meses y no falsa la tesis."""
 
     return _groq_call(prompt, max_tokens=400)
 
@@ -751,6 +801,9 @@ REGLA de niveles: usar % principalmente; niveles absolutos SOLO si son matematic
 Reglas especificas:
 - Cada escenario: trigger distinto, path distinto, nivel o rango distinto.
 - PROHIBIDO tres versiones de intensidad del mismo relato.
+- El Base case debe ser la extension mas probable del regimen actual, no su negacion elegante.
+  Si el escenario base requiere que el driver principal se disipe rapido, justificar explicitamente
+  por que sigue siendo base y no bull. Si no hay justificacion convincente, moverlo a bull.
 - Si el escenario base incluye alivio o rebote, decir explicitamente si es rebote tecnico,
   normalizacion parcial o reversion del regimen.
 - Claves a monitorear = thresholds que discriminan entre los 3 escenarios definidos.
@@ -820,6 +873,8 @@ NO es falsacion. Reemplazar por algo que realmente ponga en duda la tesis.
 Reglas especificas:
 - La mayoria de bullets debe invalidar o debilitar la tesis.
 - PROHIBIDO triggers que solo intensifican el regimen actual.
+- Ordenar bullets por proximidad a la tesis causal. Los triggers ligados al driver principal van primero.
+  Triggers de validacion secundaria (credito, sentimiento) van al final.
 - Cada bullet ataca una DIMENSION DISTINTA de la tesis:
     * Precio del driver principal (ej: oil revierte sin razon geopolitica)
     * Causalidad (ej: el activo clave se mueve pero por driver diferente al asumido)
@@ -1070,8 +1125,88 @@ class PDF(FPDF):
         self.set_left_margin(old_lm)
 
 
+def build_crossasset_chart(closes):
+    """Genera gráfico Cross-Asset Performance (21D, base 0%). Retorna path al PNG."""
+    assets = [
+        ('^GSPC',     'S&P 500', '#1B4F8A'),
+        ('^VIX',      'VIX',     '#B03A2E'),
+        ('CL=F',      'WTI',     '#E67E22'),
+        ('DX-Y.NYB',  'DXY',     '#1E8449'),
+        ('GC=F',      'Gold',    '#B7950B'),
+    ]
+    fig, ax = plt.subplots(figsize=(9, 3.8))
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
+
+    for ticker, label, color in assets:
+        if ticker not in closes.columns:
+            continue
+        s = closes[ticker].dropna()
+        if len(s) < 21:
+            continue
+        s21     = s.iloc[-21:]
+        rebased = (s21 / s21.iloc[0] - 1) * 100
+        ax.plot(rebased.index, rebased.values, label=label, color=color, linewidth=1.4)
+
+    ax.axhline(0, color='#BBBBBB', linewidth=0.7, zorder=0)
+    ax.grid(axis='y', color='#EEEEEE', linewidth=0.5, zorder=0)
+    ax.grid(axis='x', visible=False)
+
+    for spine in ['top', 'right', 'left']:
+        ax.spines[spine].set_visible(False)
+    ax.spines['bottom'].set_color('#DDDDDD')
+
+    ax.set_title('Cross-Asset Performance (21D, base 0%)',
+                 fontsize=9.5, fontweight='bold', color='#1A1A1A', pad=10, loc='left')
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:+.0f}%'))
+    ax.tick_params(axis='both', colors='#888888', labelsize=7.5)
+
+    # Reducir ticks del eje X
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=6))
+    fig.autofmt_xdate(rotation=0, ha='center')
+
+    ax.legend(loc='upper left', fontsize=7.5, frameon=False,
+              ncol=5, columnspacing=1.5, handlelength=1.5, handletextpad=0.5)
+
+    plt.tight_layout(pad=0.8)
+    chart_path = os.path.join(SUMM_DIR, f'{TODAY}_crossasset.png')
+    plt.savefig(chart_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    return chart_path
+
+
+def build_chart_json(closes):
+    """Genera JSON con datos 21D rebased a 0% para Lightweight Charts en la web."""
+    assets = [
+        ('^GSPC',    'S&P 500', '#2962FF'),
+        ('^VIX',     'VIX',     '#E53935'),
+        ('CL=F',     'WTI',     '#F57C00'),
+        ('DX-Y.NYB', 'DXY',     '#2E7D32'),
+        ('GC=F',     'Gold',    '#F9A825'),
+    ]
+    series = []
+    for ticker, label, color in assets:
+        if ticker not in closes.columns:
+            continue
+        s = closes[ticker].dropna()
+        if len(s) < 21:
+            continue
+        s21     = s.iloc[-21:]
+        base    = s21.iloc[0]
+        data    = [
+            {'time': str(idx.date()), 'value': round((val / base - 1) * 100, 4)}
+            for idx, val in s21.items()
+        ]
+        series.append({'name': label, 'color': color, 'data': data})
+
+    chart_json_path = os.path.join(SUMM_DIR, f'{TODAY}_chart.json')
+    with open(chart_json_path, 'w', encoding='utf-8') as f:
+        json.dump({'date': TODAY, 'series': series}, f, ensure_ascii=False)
+    return chart_json_path
+
+
 def build_pdf(closes, fred, cnn, btc, news, tensions,
-              interp, tldr, v3, wwcm, usdclp_comment, news_summary=None):
+              interp, tldr, v3, wwcm, usdclp_comment, news_summary=None, chart_path=None):
     pdf = PDF()
     pdf.add_page()
 
@@ -1128,6 +1263,14 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
                 pdf.body(line, size=8)
                 pdf.ln(1)
     pdf.ln(2)
+
+    # ── Cross-Asset Chart ──────────────────────────────────────────────────────
+    if chart_path and os.path.exists(chart_path):
+        pdf.section('[G] CROSS-ASSET PERFORMANCE (21D)')
+        pdf.ln(1)
+        page_w = pdf.w - pdf.l_margin - pdf.r_margin
+        pdf.image(chart_path, x=pdf.l_margin, w=page_w)
+        pdf.ln(3)
 
     # ── Sentimiento ───────────────────────────────────────────────────────────
     pdf.section('[S] SENTIMIENTO')
@@ -1484,8 +1627,14 @@ def build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment, new
 # ── run ───────────────────────────────────────────────────────────────────────
 def run():
     print('=' * 55)
+    no_llm = '--no-llm' in sys.argv
+
     print(f'  PIPELINE 3 — Macro Brief | {TODAY}')
+    if no_llm:
+        print('  MODO: --no-llm (usando cache)')
     print('=' * 55)
+
+    LLM_CACHE = os.path.join(DATA_DIR, 'llm_cache.json')
 
     # 1. Datos
     print('\n[1/3] Recopilando datos...')
@@ -1506,47 +1655,77 @@ def run():
         for t in tensions:
             print(f'  ! {t}')
 
-    # 2. Etapa 1 — Interpretacion base
-    print('\n[2/3] Gemini — Etapa 1: Interpretacion base...')
-    interp = build_interpretation(closes, fred, cnn, btc, news, tensions)
-    if interp:
-        print('  OK\n' + '-' * 55)
-        print(interp)
-        print('-' * 55)
-        regime_line = next((l for l in interp.split('\n') if l.startswith('REGIMEN:')), '')
+    if no_llm:
+        # Cargar desde caché
+        print('\n[2/3] Cargando desde caché (--no-llm)...')
+        if not os.path.exists(LLM_CACHE):
+            print('  ERROR: no existe llm_cache.json. Corre primero sin --no-llm.')
+            sys.exit(1)
+        with open(LLM_CACHE, encoding='utf-8') as f:
+            cache = json.load(f)
+        interp         = cache.get('interp', '')
+        tldr           = cache.get('tldr', '')
+        v3             = cache.get('v3', '')
+        wwcm           = cache.get('wwcm', '')
+        usdclp_comment = cache.get('usdclp_comment', '')
+        news_summary   = cache.get('news_summary', '')
+        regime_line    = next((l for l in interp.split('\n') if l.startswith('REGIMEN:')), '')
+        print(f'  OK — cache cargado ({cache.get("date","?")})')
     else:
-        print('  WARN: sin respuesta')
-        interp = 'Interpretacion no disponible.'
-        regime_line = ''
+        # 2. Etapa 1 — Interpretacion base
+        print('\n[2/3] Gemini — Etapa 1: Interpretacion base...')
+        interp = build_interpretation(closes, fred, cnn, btc, news, tensions)
+        if interp:
+            print('  OK\n' + '-' * 55)
+            print(interp)
+            print('-' * 55)
+            regime_line = next((l for l in interp.split('\n') if l.startswith('REGIMEN:')), '')
+        else:
+            print('  WARN: sin respuesta')
+            interp = 'Interpretacion no disponible.'
+            regime_line = ''
 
-    time.sleep(15)
-    # 3. Etapa 2 — Secciones
-    print('\n[3/3] Gemini — Etapa 2: Secciones...')
-    print('  TL;DR...')
-    tldr           = build_tldr(interp, cnn, btc, closes, fred)
-    time.sleep(15)
-    print('  3M View...')
-    v3             = build_3m_view(interp, closes, fred)
-    time.sleep(15)
-    print('  WWCM...')
-    wwcm           = build_wwcm(interp, tensions, closes, fred)
-    time.sleep(15)
-    print('  USDCLP...')
-    usdclp_comment = build_usdclp_comment(interp, closes)
-    time.sleep(15)
-    print('  Noticias...')
-    news_summary   = build_news_summary(news)
-    time.sleep(15)
-    print('  Pase editorial...')
-    interp, tldr, v3, wwcm, usdclp_comment = editorial_pass(
-        interp, tldr, v3, wwcm, usdclp_comment, closes
-    )
-    print('  OK — 5 secciones generadas + pase editorial')
+        time.sleep(15)
+        # 3. Etapa 2 — Secciones
+        print('\n[3/3] Gemini — Etapa 2: Secciones...')
+        print('  TL;DR...')
+        tldr           = build_tldr(interp, cnn, btc, closes, fred)
+        time.sleep(15)
+        print('  3M View...')
+        v3             = build_3m_view(interp, closes, fred)
+        time.sleep(15)
+        print('  WWCM...')
+        wwcm           = build_wwcm(interp, tensions, closes, fred)
+        time.sleep(15)
+        print('  USDCLP...')
+        usdclp_comment = build_usdclp_comment(interp, closes)
+        time.sleep(15)
+        print('  Noticias...')
+        news_summary   = build_news_summary(news)
+        time.sleep(15)
+        print('  Pase editorial...')
+        interp, tldr, v3, wwcm, usdclp_comment = editorial_pass(
+            interp, tldr, v3, wwcm, usdclp_comment, closes
+        )
+        print('  OK — 5 secciones generadas + pase editorial')
+
+        # Guardar caché
+        with open(LLM_CACHE, 'w', encoding='utf-8') as f:
+            json.dump({
+                'date': TODAY, 'interp': interp, 'tldr': tldr,
+                'v3': v3, 'wwcm': wwcm, 'usdclp_comment': usdclp_comment,
+                'news_summary': news_summary,
+            }, f, ensure_ascii=False, indent=2)
+        print('  Cache guardado.')
 
     # 4. Output
     stem     = f'{TODAY}_p3'
     md_path  = os.path.join(SUMM_DIR, f'{stem}.md')
     pdf_path = os.path.join(SUMM_DIR, f'{stem}.pdf')
+
+    print('  Generando gráfico...')
+    chart_path      = build_crossasset_chart(closes)
+    chart_json_path = build_chart_json(closes)
 
     md = build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment, news_summary=news_summary)
     with open(md_path, 'w', encoding='utf-8') as f:
@@ -1554,7 +1733,8 @@ def run():
 
     try:
         pdf = build_pdf(closes, fred, cnn, btc, news, tensions,
-                        interp, tldr, v3, wwcm, usdclp_comment, news_summary=news_summary)
+                        interp, tldr, v3, wwcm, usdclp_comment, news_summary=news_summary,
+                        chart_path=chart_path)
         pdf.output(pdf_path)
         print(f'\n  PDF: data/daily_summaries/{stem}.pdf')
     except Exception as e:
