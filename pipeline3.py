@@ -485,12 +485,13 @@ def _parse_interp(interp):
     return fields
 
 
-# ── llm call (Gemini primario, Groq como fallback) ───────────────────────────
-def _groq_call(prompt, max_tokens=800):
-    gemini_key = os.environ.get('GEMINI_API_KEY', '')
-    if gemini_key:
-        return _gemini_call(prompt, gemini_key, max_tokens)
-    return _groq_call_impl(prompt, max_tokens)
+# ── llm call ─────────────────────────────────────────────────────────────────
+def _llm_call(prompt, max_tokens=800):
+    api_key = os.environ.get('GEMINI_API_KEY', '')
+    if not api_key:
+        print('  WARNING: GEMINI_API_KEY no configurada')
+        return None
+    return _gemini_call(prompt, api_key, max_tokens)
 
 def _gemini_call(prompt, api_key, max_tokens=800, model=None):
     model = model or os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
@@ -531,28 +532,6 @@ def _gemini_call(prompt, api_key, max_tokens=800, model=None):
     print('  WARNING Gemini: se agotaron los reintentos (429 persistente)')
     return None
 
-def _groq_call_impl(prompt, max_tokens=800):
-    api_key = os.environ.get('GROQ_API_KEY', '')
-    model   = os.environ.get('GROQ_MODEL', 'deepseek-r1-distill-llama-70b')
-    if not api_key:
-        return None
-    try:
-        r = requests.post(
-            'https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization': f'Bearer {api_key}',
-                     'Content-Type': 'application/json'},
-            json={'model': model,
-                  'messages': [{'role': 'user', 'content': prompt}],
-                  'max_tokens': max_tokens, 'temperature': 0.3},
-            timeout=30,
-        )
-        if not r.ok:
-            print(f'  WARNING Groq {r.status_code}: {r.text[:120]}')
-            return None
-        return r.json()['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        print(f'  WARNING Groq: {e}')
-        return None
 
 
 # ── ETAPA 1: Interpretacion base ──────────────────────────────────────────────
@@ -633,7 +612,7 @@ DIVERGENCIAS: [el dato que menos encaja con la lectura central, con numero. O "S
 Regla critica: las 3 senales deben aportar informacion distinta entre si.
 PROHIBIDO tres senales que digan lo mismo desde tres activos distintos."""
 
-    return _groq_call(prompt, max_tokens=600)
+    return _llm_call(prompt, max_tokens=600)
 
 
 # ── ETAPA 2: Secciones ────────────────────────────────────────────────────────
@@ -748,7 +727,7 @@ Sin titulos, sin introduccion, solo los 4 bullets.
 Regla critica final:
 TL;DR prioriza. No explica el marco, no proyecta 3 meses y no falsa la tesis."""
 
-    return _groq_call(prompt, max_tokens=400)
+    return _llm_call(prompt, max_tokens=400)
 
 
 def build_3m_view(interp, closes, fred):
@@ -823,7 +802,7 @@ Genera 3M VIEW con EXACTAMENTE 5 bullets en espanol, comenzando cada uno con "- 
 {CHECK_FINAL}
 Sin titulos, sin introduccion, solo los 5 bullets."""
 
-    return _groq_call(prompt, max_tokens=700)
+    return _llm_call(prompt, max_tokens=700)
 
 
 def build_wwcm(interp, tensions, closes, fred):
@@ -894,7 +873,7 @@ Sin titulos, sin introduccion, solo los bullets.
 
 Regla critica: WWCM es falsacion real. No mezclar con "what would reinforce the view"."""
 
-    return _groq_call(prompt, max_tokens=500)
+    return _llm_call(prompt, max_tokens=500)
 
 
 def build_usdclp_comment(interp, closes):
@@ -945,7 +924,7 @@ Genera comentario USDCLP de 2-3 oraciones en espanol:
 Datos: USDCLP {clp_now} | W: {clp_w} | M: {clp_m} | Q: {clp_q} | Cobre Q: {cu_q} | DXY Q: {dxy_q}
 Directo al punto, sin titulos."""
 
-    return _groq_call(prompt, max_tokens=300)
+    return _llm_call(prompt, max_tokens=300)
 
 
 # ── Pase editorial ────────────────────────────────────────────────────────────
@@ -1037,30 +1016,77 @@ def build_news_summary(news):
         f'[{i+1}] [{a["source"]}] {a["title"]} — {a.get("summary","")[:200]}'
         for i, a in enumerate(news[:10])
     )
-    prompt = f"""Eres un editor de noticias financieras. Sintetiza los articulos en 3 a 5 oraciones en ESPANOL NEUTRO.
-CRITICO: Todo el output debe estar en español neutro, sin excepcion. Traduce cualquier contenido en ingles.
-No uses palabras en ingles salvo nombres propios inevitables (nombres de personas, empresas, indices).
+    prompt = f"""Eres un editor de market note macro.
+No resumes articulos: seleccionas solo noticias con impacto real de mercado.
 
-JERARQUIA OBLIGATORIA (orden de aparicion):
-1. Primero: lo que movio precios de activos (equities, petroleo, tasas, FX) — con el dato concreto.
-2. Segundo: catalizador geopolitico o macro que explica ese movimiento.
-3. Tercero: contexto adicional relevante, solo si aporta algo nuevo.
+Objetivo:
+Convertir un set de articulos en 3 a 5 lineas de alto valor informativo para un lector financiero.
+Cada linea debe decir que hecho importa, por que importa para precios y que lo diferencia del resto.
+No narrar la noticia. No escribir como prensa generalista.
 
-Formato de salida OBLIGATORIO:
+CRITICO:
+- Todo el output debe estar en español neutro, sin excepcion.
+- Traduce cualquier contenido en ingles.
+- No uses palabras en ingles salvo nombres propios inevitables.
+- Tono seco, preciso y adulto.
+- Escribir como editor financiero, no como periodista generalista.
+
+UNIDAD DE ANALISIS:
+- La unidad NO es el articulo; la unidad es el hecho con impacto de mercado.
+- Si 3 articulos cubren el mismo hecho, escribir UNA sola linea.
+- Si un articulo no agrega novedad marginal, ignorarlo.
+- Si un hecho no cambia lectura de activos, expectativas macro o riesgo de oferta, ignorarlo.
+
+JERARQUIA OBLIGATORIA:
+1. Primero, hechos que movieron o pueden mover pricing de activos: equities, petroleo, tasas, dolar, FX, credito.
+2. Segundo, catalizador concreto que explica ese movimiento: decision, amenaza, dato, declaracion con implicancia real.
+3. Tercero, solo si aporta valor, una implicancia de segundo orden: oferta, inflacion, riesgo de contagio, timing, posicionamiento.
+
+REGLAS DE SELECCION:
+- Priorizar hechos, no narrativas.
+- Priorizar novedad marginal, no contexto repetido.
+- Priorizar impacto observable o mecanismo claro de transmision.
+- Si no hay impacto claro de mercado, no incluir.
+- PROHIBIDO rellenar para llegar a 5 lineas.
+- Si solo hay 2 o 3 hechos relevantes, escribir 2 o 3.
+
+PROHIBIDO:
+- "los inversionistas reaccionaron"
+- "en medio de la incertidumbre"
+- "el mercado sigue atento"
+- "persisten las tensiones"
+- "esto ocurre en un contexto de..."
+- "podria generar volatilidad" sin explicar en que activo o por que
+- repetir el mismo hecho con wording distinto
+- contar cronologia innecesaria
+- resumir declaraciones sin implicancia de mercado
+
+FORMATO DE SALIDA OBLIGATORIO:
 - Una oracion por linea.
-- Cada oracion termina con el NUMERO del articulo fuente entre parentesis: (1), (3), etc.
-- Si varios articulos cubren el mismo hecho, elige el mas relevante — EXACTAMENTE un numero por oracion, nunca (5, 10).
-- Agrupa articulos del mismo tema en UNA sola oracion — no repitas el mismo hecho en dos lineas.
-- No inventes datos. Tono directo. Sin frases genericas. Sin titulo ni introduccion.
+- Cada oracion termina con EXACTAMENTE un numero de articulo fuente entre parentesis: (1), (3), etc.
+- Nunca usar mas de un numero por linea.
+- Cada linea debe ser autocontenida y aportar una idea distinta.
+- Sin titulo.
+- Sin introduccion.
+- Sin cierre.
 
-Ejemplo correcto:
-El petroleo cayo -10% tras la pausa de Trump en ataques a Iran (3).
-El CEO de Chevron advirtio que el mercado no ha procesado completamente el shock de oferta (1).
+REGLA DE CALIDAD:
+Si una linea puede aparecer en cualquier newsletter financiera cambiando solo nombres y numeros, reescribirla.
+Si una linea describe la noticia pero no su implicancia para mercado, reescribirla.
+Si una linea suena a prensa generalista, reescribirla.
+
+EJEMPLOS DE TONO CORRECTO:
+- El crudo subio tras amenazas de interrupcion de oferta en Medio Oriente, no por mejora de demanda global (3).
+- La sorpresa no fue la noticia geopolitica, sino que tasas largas y dolar absorbieran el shock sin deterioro equivalente en credito (6).
+- El dato relevante no es la declaracion politica en si, sino su capacidad de retrasar una baja de tasas ya descontada por mercado (2).
 
 ARTICULOS:
-{articles_txt}"""
+{articles_txt}
 
-    return _groq_call(prompt, max_tokens=400)
+No todos los articulos merecen entrar.
+Si un articulo solo agrega color, contexto obvio o narrativa repetida, excluirlo."""
+
+    return _llm_call(prompt, max_tokens=500)
 
 
 # ── PDF ───────────────────────────────────────────────────────────────────────
@@ -1162,7 +1188,9 @@ def build_crossasset_chart(closes):
     ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5))
     fig.autofmt_xdate(rotation=0, ha='center')
 
-    # Leyenda inline al final de cada línea (último valor)
+    # Leyenda inline: recopilar valores finales y separar labels superpuestos
+    import matplotlib.transforms as mtransforms
+    label_data = []
     for ticker, label, color in assets:
         if ticker not in closes.columns:
             continue
@@ -1171,10 +1199,28 @@ def build_crossasset_chart(closes):
             continue
         s21     = s.iloc[-21:]
         rebased = (s21 / s21.iloc[0] - 1) * 100
-        last_val = rebased.iloc[-1]
-        ax.annotate(f' {label}', xy=(rebased.index[-1], last_val),
-                    fontsize=6.5, color=color, va='center',
-                    xytext=(3, 0), textcoords='offset points')
+        label_data.append([rebased.iloc[-1], rebased.iloc[-1], label, color])
+        # campos: y_actual, y_label, label, color
+
+    # Separación mínima (~5% del rango visible)
+    y_min, y_max = ax.get_ylim()
+    min_gap = (y_max - y_min) * 0.05
+
+    # Ordenar por valor, empujar hacia arriba los que chocan, luego centrar
+    label_data.sort(key=lambda r: r[0])
+    for i in range(1, len(label_data)):
+        if label_data[i][1] - label_data[i-1][1] < min_gap:
+            label_data[i][1] = label_data[i-1][1] + min_gap
+    orig_mid = (label_data[0][0] + label_data[-1][0]) / 2
+    adj_mid  = (label_data[0][1] + label_data[-1][1]) / 2
+    for row in label_data:
+        row[1] += orig_mid - adj_mid
+
+    # Transform: x en axes fraction (derecho del gráfico), y en data coords
+    trans = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)
+    for y_actual, y_label, label, color in label_data:
+        ax.text(1.01, y_label, label, transform=trans,
+                fontsize=6.5, color=color, va='center', clip_on=False)
 
     ax.set_xlim(right=ax.get_xlim()[1] * 1.0)
     plt.tight_layout(pad=0.6)
