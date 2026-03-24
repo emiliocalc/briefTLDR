@@ -220,8 +220,11 @@ def get_btc_fg():
         return {'score': None, 'rating': 'N/A'}
 
 def get_news(max_items=10):
-    seen, articles = set(), []
+    seen = set()
+    per_source = []  # lista de (score, article) por fuente, luego merge
+
     for source, url in NEWS_FEEDS:
+        source_articles = []
         try:
             feed = feedparser.parse(url)
             for e in feed.entries[:20]:
@@ -234,13 +237,18 @@ def get_news(max_items=10):
                 if not any(kw in combined for kw in NEWS_KEYWORDS):
                     continue
                 score = sum(1 for kw in NEWS_KEYWORDS if kw in combined)
-                articles.append({'title': title, 'source': source,
-                                  'summary': e.get('summary', '')[:200], 'score': score,
-                                  'url': e.get('link', '')})
+                source_articles.append({'title': title, 'source': source,
+                                        'summary': e.get('summary', '')[:200],
+                                        'score': score, 'url': e.get('link', '')})
         except Exception:
             continue
-    articles.sort(key=lambda x: x['score'], reverse=True)
-    return articles[:max_items]
+        # Tomar el mejor artículo de cada fuente (garantiza diversidad)
+        source_articles.sort(key=lambda x: x['score'], reverse=True)
+        per_source.extend(source_articles[:2])  # máx 2 por fuente
+
+    # Rankear el pool diversificado y devolver top N
+    per_source.sort(key=lambda x: x['score'], reverse=True)
+    return per_source[:max_items]
 
 
 # ── macro helpers ─────────────────────────────────────────────────────────────
