@@ -1126,17 +1126,24 @@ class PDF(FPDF):
 
 
 def build_crossasset_chart(closes):
-    """Genera gráfico Cross-Asset Performance (21D, base 0%). Retorna path al PNG."""
+    """Genera gráfico Cross-Asset Performance (21D, base 0%) estilo Lightweight Charts."""
+    BG      = '#131722'
+    GRID    = '#1e222d'
+    ZERO    = '#2a2e39'
+    TICK    = '#787b86'
+    TITLE   = '#d1d4dc'
+
     assets = [
-        ('^GSPC',     'S&P 500', '#1B4F8A'),
-        ('^VIX',      'VIX',     '#B03A2E'),
-        ('CL=F',      'WTI',     '#E67E22'),
-        ('DX-Y.NYB',  'DXY',     '#1E8449'),
-        ('GC=F',      'Gold',    '#B7950B'),
+        ('^GSPC',    'S&P 500', '#2962FF'),
+        ('^VIX',     'VIX',     '#E53935'),
+        ('CL=F',     'WTI',     '#F57C00'),
+        ('DX-Y.NYB', 'DXY',     '#26a69a'),
+        ('GC=F',     'Gold',    '#FFD700'),
     ]
-    fig, ax = plt.subplots(figsize=(9, 3.8))
-    fig.patch.set_facecolor('white')
-    ax.set_facecolor('white')
+
+    fig, ax = plt.subplots(figsize=(9, 3.6))
+    fig.patch.set_facecolor(BG)
+    ax.set_facecolor(BG)
 
     for ticker, label, color in assets:
         if ticker not in closes.columns:
@@ -1146,31 +1153,45 @@ def build_crossasset_chart(closes):
             continue
         s21     = s.iloc[-21:]
         rebased = (s21 / s21.iloc[0] - 1) * 100
-        ax.plot(rebased.index, rebased.values, label=label, color=color, linewidth=1.4)
+        ax.plot(rebased.index, rebased.values, label=label, color=color,
+                linewidth=1.5, solid_capstyle='round')
 
-    ax.axhline(0, color='#BBBBBB', linewidth=0.7, zorder=0)
-    ax.grid(axis='y', color='#EEEEEE', linewidth=0.5, zorder=0)
+    ax.axhline(0, color=ZERO, linewidth=0.8, zorder=0)
+    ax.grid(axis='y', color=GRID, linewidth=0.6, zorder=0)
     ax.grid(axis='x', visible=False)
 
-    for spine in ['top', 'right', 'left']:
-        ax.spines[spine].set_visible(False)
-    ax.spines['bottom'].set_color('#DDDDDD')
+    for spine in ax.spines.values():
+        spine.set_visible(False)
 
-    ax.set_title('Cross-Asset Performance (21D, base 0%)',
-                 fontsize=9.5, fontweight='bold', color='#1A1A1A', pad=10, loc='left')
+    ax.set_title('Cross-Asset Performance  ·  21D, base 0%',
+                 fontsize=8.5, fontweight='normal', color=TITLE,
+                 pad=10, loc='left', fontfamily='monospace')
+
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:+.0f}%'))
-    ax.tick_params(axis='both', colors='#888888', labelsize=7.5)
-
-    # Reducir ticks del eje X
-    ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=6))
+    ax.tick_params(axis='both', colors=TICK, labelsize=7, length=0)
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5))
     fig.autofmt_xdate(rotation=0, ha='center')
 
-    ax.legend(loc='upper left', fontsize=7.5, frameon=False,
-              ncol=5, columnspacing=1.5, handlelength=1.5, handletextpad=0.5)
+    # Leyenda inline al final de cada línea (último valor)
+    for ticker, label, color in assets:
+        if ticker not in closes.columns:
+            continue
+        s = closes[ticker].dropna()
+        if len(s) < 21:
+            continue
+        s21     = s.iloc[-21:]
+        rebased = (s21 / s21.iloc[0] - 1) * 100
+        last_val = rebased.iloc[-1]
+        ax.annotate(f' {label}', xy=(rebased.index[-1], last_val),
+                    fontsize=6.5, color=color, va='center',
+                    xytext=(3, 0), textcoords='offset points')
 
-    plt.tight_layout(pad=0.8)
+    ax.set_xlim(right=ax.get_xlim()[1] * 1.0)
+    plt.tight_layout(pad=0.6)
+    fig.subplots_adjust(right=0.82)
+
     chart_path = os.path.join(SUMM_DIR, f'{TODAY}_crossasset.png')
-    plt.savefig(chart_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(chart_path, dpi=150, bbox_inches='tight', facecolor=BG)
     plt.close()
     return chart_path
 
@@ -1266,11 +1287,10 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
 
     # ── Cross-Asset Chart ──────────────────────────────────────────────────────
     if chart_path and os.path.exists(chart_path):
-        pdf.section('[G] CROSS-ASSET PERFORMANCE (21D)')
-        pdf.ln(1)
+        pdf.ln(2)
         page_w = pdf.w - pdf.l_margin - pdf.r_margin
         pdf.image(chart_path, x=pdf.l_margin, w=page_w)
-        pdf.ln(3)
+        pdf.ln(4)
 
     # ── Sentimiento ───────────────────────────────────────────────────────────
     pdf.section('[S] SENTIMIENTO')
