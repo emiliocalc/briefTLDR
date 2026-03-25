@@ -31,8 +31,10 @@ jobs:
 
       - name: Run Pipeline 3
         env:
-          FRED_API_KEY:   ${{ secrets.FRED_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FRED_API_KEY:       ${{ secrets.FRED_API_KEY }}
+          GEMINI_API_KEY_1:   ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2:   ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3:   ${{ secrets.GEMINI_API_KEY_3 }}
         run: python pipeline3.py
 
       - name: Update briefs.json

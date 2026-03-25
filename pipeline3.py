@@ -502,50 +502,53 @@ def _parse_interp(interp):
 
 # ── llm call ─────────────────────────────────────────────────────────────────
 def _llm_call(prompt, max_tokens=800):
-    api_key = os.environ.get('GEMINI_API_KEY', '')
-    if not api_key:
+    keys = [v for k, v in sorted(os.environ.items())
+            if k.startswith('GEMINI_API_KEY') and v]
+    if not keys:
         print('  WARNING: GEMINI_API_KEY no configurada')
         return None
-    return _gemini_call(prompt, api_key, max_tokens)
+    model = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
+    for key in keys:
+        result = _gemini_call(prompt, key, max_tokens, model=model)
+        if result is not None:
+            return result
+        print('  Rotando a siguiente key Gemini...')
+    print('  WARNING: todas las keys agotadas')
+    return None
 
 def _gemini_call(prompt, api_key, max_tokens=800, model=None):
     model = model or os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
     url   = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}'
-    for attempt in range(4):
-        try:
-            r = requests.post(
-                url,
-                headers={'Content-Type': 'application/json'},
-                json={
-                    'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
-                    'generationConfig': {
-                        'maxOutputTokens': 8192,
-                        'temperature':     0.3,
-                        'thinkingConfig':  {'thinkingBudget': 0},
-                    },
+    try:
+        r = requests.post(
+            url,
+            headers={'Content-Type': 'application/json'},
+            json={
+                'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
+                'generationConfig': {
+                    'maxOutputTokens': 8192,
+                    'temperature':     0.3,
+                    'thinkingConfig':  {'thinkingBudget': 0},
                 },
-                timeout=120,
-            )
-            if r.status_code == 429:
-                wait = 35 * (attempt + 1)
-                print(f'  429 rate limit — esperando {wait}s (intento {attempt+1}/4)...')
-                time.sleep(wait)
-                continue
-            if not r.ok:
-                print(f'  WARNING Gemini {r.status_code}: {r.text[:200]}')
-                return None
-            candidates = r.json().get('candidates', [])
-            if not candidates:
-                print(f'  WARNING Gemini: no candidates in response')
-                return None
-            parts = candidates[0]['content']['parts']
-            text  = ''.join(p['text'] for p in parts if not p.get('thought', False))
-            return text.strip() or None
-        except Exception as e:
-            print(f'  WARNING Gemini: {e}')
+            },
+            timeout=120,
+        )
+        if r.status_code == 429:
+            print(f'  429 en key ...{api_key[-6:]}')
             return None
-    print('  WARNING Gemini: se agotaron los reintentos (429 persistente)')
-    return None
+        if not r.ok:
+            print(f'  WARNING Gemini {r.status_code}: {r.text[:200]}')
+            return None
+        candidates = r.json().get('candidates', [])
+        if not candidates:
+            print(f'  WARNING Gemini: no candidates in response')
+            return None
+        parts = candidates[0]['content']['parts']
+        text  = ''.join(p['text'] for p in parts if not p.get('thought', False))
+        return text.strip() or None
+    except Exception as e:
+        print(f'  WARNING Gemini: {e}')
+        return None
 
 
 
@@ -945,9 +948,11 @@ Directo al punto, sin titulos."""
 # ── Pase editorial ────────────────────────────────────────────────────────────
 def editorial_pass(interp, tldr, v3, wwcm, clp_comment, closes):
     """Segunda llamada a Gemini como editor: elimina lenguaje generico y corrige contradicciones cross-seccion."""
-    api_key = os.environ.get('GEMINI_API_KEY', '')
-    if not api_key:
+    keys = [v for k, v in sorted(os.environ.items())
+            if k.startswith('GEMINI_API_KEY') and v]
+    if not keys:
         return interp, tldr, v3, wwcm, clp_comment
+    api_key = keys[0]
 
     macro_txt = format_macro_summary(closes)
 
@@ -1006,7 +1011,7 @@ Responde EXACTAMENTE en este formato (sin texto antes ni despues de los delimita
 [clp corregido]
 ===FIN==="""
 
-    result = _gemini_call(prompt, api_key, max_tokens=4000, model='gemini-2.5-flash')
+    result = _gemini_call(prompt, api_key, max_tokens=4000, model='gemini-2.0-flash')
     if not result:
         return interp, tldr, v3, wwcm, clp_comment
 
