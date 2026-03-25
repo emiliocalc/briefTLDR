@@ -1319,7 +1319,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     close_date = (yesterday - timedelta(days=delta)).strftime('%d/%m/%Y')
     disclaimer_text = (
         f'Todos los precios y retornos corresponden al cierre de mercado del {close_date}. '
-        f'La interpretacion de los datos es generada automaticamente por un modelo de inteligencia artificial (Gemini 2.5 Pro) que puede cometer errores. '
+        f'La interpretacion de los datos es generada automaticamente por un modelo de inteligencia artificial ({os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")}) que puede cometer errores. '
         f'Este reporte es de caracter informativo y educativo. '
         f'No constituye asesoramiento financiero ni una recomendacion de inversion. '
         f'Vista Macro no se responsabiliza por decisiones tomadas en base a este contenido.'
@@ -1343,7 +1343,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
 
     # ── Cross-Asset Chart ──────────────────────────────────────────────────────
     if chart_path and os.path.exists(chart_path):
-        pdf.section('Cross Asset Performance  21D  base 0%')
+        pdf.section('[C21] CROSS ASSET PERFORMANCE 21D BASE 0%')
         page_w = pdf.w - pdf.l_margin - pdf.r_margin
         pdf.image(chart_path, x=pdf.l_margin, w=page_w)
         pdf.ln(4)
@@ -1609,7 +1609,7 @@ def build_md(closes, news, tensions, interp, tldr, v3, wwcm, usdclp_comment, new
     L = []
 
     L += [f'# VISTA MACRO — MACRO BRIEF | {TODAY}',
-          f'*Pipeline 3  |  {now.strftime("%Y-%m-%d %H:%M")}  |  Gemini 2.5 Flash*',
+          f'*Pipeline 3  |  {now.strftime("%Y-%m-%d %H:%M")}  |  {os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")}*',
           '']
 
     L += ['## [TL;DR]', '']
