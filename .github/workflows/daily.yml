@@ -2,7 +2,7 @@ name: Daily Macro Brief
 
 on:
   schedule:
-    - cron: '10 21 * * 1-5'  # Lunes a viernes 21:10 UTC (4:10 PM NY / ~6:10 PM Santiago)
+    - cron: '20 13 * * *'  # TEST: 13:20 UTC = 10:20 AM Santiago (UTC-3)
   workflow_dispatch:           # Permite correrlo manualmente desde GitHub
 
 jobs:
