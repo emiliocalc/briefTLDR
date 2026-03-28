@@ -40,6 +40,8 @@ FRED_SERIES = {
     "T10Y2Y":      "Spread 10Y-2Y (curva inversiÃ³n = recesiÃ³n warning)",
     "DGS10":       "Treasury 10Y yield",
     "DGS2":        "Treasury 2Y yield",
+    "DFII10":      "Real yield 10Y (TIPS) — costo real del dinero",
+    "MOVE":        "MOVE index — volatilidad implicita bonos del Tesoro",
 
     # Empleo
     "UNRATE":      "Tasa desempleo USA",

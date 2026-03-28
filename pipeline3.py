@@ -67,9 +67,13 @@ MACRO_TICKERS = {
     'TLT':       'Bonos 20yr',
     'HYG':       'High Yield',
     '^VIX':      'VIX',
+    '^VVIX':     'VVIX',
+    '^VIX3M':    'VIX3M',
     'GC=F':      'Oro',
     'DX-Y.NYB':  'DXY',
     'CL=F':      'Oil WTI',
+    'BZ=F':      'Brent',
+    'NG=F':      'Nat Gas',
     'HG=F':      'Cobre',
     'USDJPY=X':  'USD/JPY',
     'USDCLP=X':  'USD/CLP',
@@ -285,7 +289,10 @@ def detect_tensions(closes, fred, cnn):
     sp_d1    = d1_ret(closes['^GSPC'].dropna()) if '^GSPC' in closes.columns else 0
     gold_ytd = ytd_ret(closes['GC=F'].dropna()) if 'GC=F'  in closes.columns else 0
     sp_ytd   = ytd_ret(closes['^GSPC'].dropna())if '^GSPC' in closes.columns else 0
-    vix      = _scalar(closes['^VIX'].dropna()) if '^VIX'  in closes.columns else 20
+    vix      = _scalar(closes['^VIX'].dropna())  if '^VIX'   in closes.columns else 20
+    vvix     = _scalar(closes['^VVIX'].dropna()) if '^VVIX'  in closes.columns else None
+    vix3m    = _scalar(closes['^VIX3M'].dropna())if '^VIX3M' in closes.columns else None
+    move     = fred.get('MOVE', {}).get('value', None)
     hy_s     = fred.get('BAMLH0A0HYM2', {}).get('value', 3.0)
     cnn_s    = cnn.get('score', 50)
 
@@ -313,6 +320,20 @@ def detect_tensions(closes, fred, cnn):
         tensions.append('Crecimiento en contraccion pero credito estable -> desaceleracion, no crisis (aun)')
     if liq == 'contrayendo' and vix and vix < 25:
         tensions.append('Liquidez en contraccion pero volatilidad no extrema -> complacencia potencial')
+    wti   = _scalar(closes['CL=F'].dropna()) if 'CL=F' in closes.columns else None
+    brent = _scalar(closes['BZ=F'].dropna()) if 'BZ=F' in closes.columns else None
+    if wti and brent:
+        spread = brent - wti
+        if spread > 5:
+            tensions.append(f'Brent-WTI spread ${spread:.1f} amplio -> presion geopolitica en crudo europeo vs americano')
+        elif spread < 0:
+            tensions.append(f'WTI > Brent (spread {spread:.1f}) -> anomalia: demanda interna USA superando global')
+    if vvix and vix and vvix > 120:
+        tensions.append(f'VVIX {vvix:.0f} elevado -> mercado comprando proteccion activamente, vol de la vol alta (panico real)')
+    if vix and vix3m and vix > vix3m:
+        tensions.append(f'VIX {vix:.1f} > VIX3M {vix3m:.1f} -> term structure en backwardation: stress de corto plazo, no sistemico')
+    if move and move > 120:
+        tensions.append(f'MOVE {move:.0f} elevado -> volatilidad en bonos del Tesoro alta, incertidumbre sobre tasas')
     return tensions
 
 
@@ -337,8 +358,9 @@ def format_fred_summary(fred):
     def v(key): return fred.get(key, {}).get('value', 'N/D')
     return (
         f"Fed Funds {v('FEDFUNDS')}%  |  10Y {v('DGS10')}%  |  2Y {v('DGS2')}%  |  "
-        f"Spread 10Y-2Y {v('T10Y2Y')}%  |  Inflacion impl 5Y {v('T5YIE')}%\n"
+        f"Spread 10Y-2Y {v('T10Y2Y')}%  |  Real yield 10Y {v('DFII10')}%  |  Inflacion impl 5Y {v('T5YIE')}%\n"
         f"HY spread {v('BAMLH0A0HYM2')}  |  IG spread {v('BAMLC0A0CM')}  |  "
+        f"MOVE index {v('MOVE')}  |  "
         f"Desempleo {v('UNRATE')}%  |  Confianza consumidor {v('UMCSENT')}"
     )
 
@@ -477,7 +499,7 @@ CHECK FINAL (OBLIGATORIO):
 # ── helpers de parsing ───────────────────────────────────────────────────────
 def _parse_interp(interp):
     """Extrae campos estructurados del texto de interpretacion."""
-    fields = {'REGIMEN': '', 'LECTURA_CENTRAL': '', 'SENALES': '', 'DIVERGENCIAS': ''}
+    fields = {'REGIMEN': '', 'LECTURA_CENTRAL': '', 'SENALES': '', 'DIVERGENCIAS': '', 'ESTADO_MERCADO': '', 'TRIGGER_TRANSICION': ''}
     if not interp:
         return fields
     current = None
@@ -627,6 +649,16 @@ REGLA CRITICA para [mecanismo]:
 
 DIVERGENCIAS: [el dato que menos encaja con la lectura central, con numero. O "Sin divergencias relevantes".]
 
+ESTADO_MERCADO: [clasifica el estado actual en UNA de estas 3 categorias y justifica con datos:
+  ESTADO 1 — HEDGED FEAR: VIX elevado, credito estable (HY < 400bps), liquidez OK, MOVE < 120. Miedo ordenado.
+  ESTADO 2 — STRESS PROPAGATION: VIX elevado + credito abriendo (HY > 400bps) o MOVE > 120. Stress se propaga.
+  ESTADO 3 — SYSTEMIC EVENT: correlaciones a 1, HY > 600bps, forced selling, liquidez deteriorada.
+  Formato: "Estado X — NOMBRE: [justificacion con 2 datos concretos]".]
+
+TRIGGER_TRANSICION: [una sola oracion: que dato especifico o nivel concreto cambiaria el estado actual al siguiente.
+  Ejemplo: "Si HY supera 450bps esta semana, el stress de equities deja de ser aislado (Estado 2)."
+  PROHIBIDO: respuestas vagas como "deterioro adicional" o "aumento de la incertidumbre".]
+
 Regla critica: las 3 senales deben aportar informacion distinta entre si.
 PROHIBIDO tres senales que digan lo mismo desde tres activos distintos."""
 
@@ -652,6 +684,8 @@ def build_tldr(interp, cnn, btc, closes, fred):
     parsed = _parse_interp(interp)
     regimen        = parsed['REGIMEN']
     lectura        = parsed['LECTURA_CENTRAL']
+    estado         = parsed['ESTADO_MERCADO']
+    trigger        = parsed['TRIGGER_TRANSICION']
 
     datos_adicionales = (
         f"10Y: {dgs10}% | S&P Q: {sp_q} | "
@@ -669,6 +703,8 @@ No resumir todo el analisis. Seleccionar, jerarquizar y descartar.
 MARCO DEL DIA (referencia — NO reformular ni parafrasear de forma perezosa):
 REGIMEN: {regimen}
 LECTURA_CENTRAL: {lectura}
+ESTADO_MERCADO: {estado}
+TRIGGER_TRANSICION: {trigger}
 
 RETORNOS 1D EXACTOS (usar estos numeros exactos — NO cambiarlos):
 {retornos_1d}
@@ -836,6 +872,10 @@ def build_wwcm(interp, tensions, closes, fred):
     regimen  = parsed['REGIMEN']
     lectura  = parsed['LECTURA_CENTRAL']
     senales  = parsed['SENALES']
+    estado   = parsed['ESTADO_MERCADO']
+    trigger  = parsed['TRIGGER_TRANSICION']
+    move     = fred.get('MOVE',  {}).get('value', 'N/D')
+    dfii10   = fred.get('DFII10',{}).get('value', 'N/D')
 
     prompt = f"""Eres un analista macro senior.
 {REGLAS_CONSISTENCIA}
@@ -847,11 +887,13 @@ No listar variables importantes. No proyectar. No confirmar la tesis. Solo falsa
 TESIS Y SENALES VIGENTES (identificar que evidencia las invalidaria — NO reformularlas):
 REGIMEN: {regimen}
 LECTURA_CENTRAL: {lectura}
+ESTADO_MERCADO: {estado}
+TRIGGER_TRANSICION: {trigger}
 SENALES:
 {senales}
 
 PRECIOS ACTUALES (referencia exacta):
-S&P 500: {sp} | VIX: {vix} | Oil WTI: {oil} | HY spread: {hy}% | 10Y Treasury: {dgs}%
+S&P 500: {sp} | VIX: {vix} | Oil WTI: {oil} | HY spread: {hy}% | 10Y Treasury: {dgs}% | Real yield 10Y: {dfii10}% | MOVE: {move}
 
 REGLA OBLIGATORIA: toda variacion porcentual incluye horizonte (1D), (W=5d), (M=21d) o (Q=63d).
 EXCEPCION: Fear & Greed NO tiene horizonte temporal.
@@ -1401,6 +1443,30 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         pdf.ln()
     pdf.ln(2)
 
+    # ── Datos FRED clave ──────────────────────────────────────────────────────
+    fred_rows = [
+        ('Fed Funds',   f"{fred.get('FEDFUNDS',{}).get('value','N/D')}%"),
+        ('2Y Yield',    f"{fred.get('DGS2',    {}).get('value','N/D')}%"),
+        ('10Y Yield',   f"{fred.get('DGS10',   {}).get('value','N/D')}%"),
+        ('Real 10Y',    f"{fred.get('DFII10',  {}).get('value','N/D')}%"),
+        ('2s10s',       f"{fred.get('T10Y2Y',  {}).get('value','N/D')}%"),
+        ('HY Spread',   f"{fred.get('BAMLH0A0HYM2',{}).get('value','N/D')}%"),
+        ('IG Spread',   f"{fred.get('BAMLC0A0CM', {}).get('value','N/D')}%"),
+        ('MOVE',        f"{fred.get('MOVE',    {}).get('value','N/D')}"),
+    ]
+    pdf.set_font('Helvetica', 'B', 7.5)
+    pdf.set_fill_color(230, 235, 245)
+    col_w = (pdf.w - pdf.l_margin - pdf.r_margin) / len(fred_rows)
+    for label, _ in fred_rows:
+        pdf.cell(col_w, 5, clean(label), fill=True, align='C')
+    pdf.ln()
+    pdf.set_font('Helvetica', '', 7.5)
+    pdf.set_fill_color(248, 248, 252)
+    for _, val in fred_rows:
+        pdf.cell(col_w, 5, clean(val), fill=True, align='C')
+    pdf.ln()
+    pdf.ln(2)
+
     # ── Tensiones ─────────────────────────────────────────────────────────────
     if tensions:
         pdf.section('[!] TENSIONES DETECTADAS')
@@ -1463,6 +1529,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         'REGIMEN': 'Régimen', 'CAUSA_RAIZ': 'Lectura Central',
         'LECTURA_CENTRAL': 'Lectura Central',
         'SENALES': 'Señales', 'DIVERGENCIAS': 'Divergencias',
+        'ESTADO_MERCADO': 'Estado de Mercado', 'TRIGGER_TRANSICION': 'Trigger Transición',
     }
     pdf.section('[I] INTERPRETACION BASE (*)', min_space=90)
     if interp:
