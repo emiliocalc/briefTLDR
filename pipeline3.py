@@ -60,24 +60,41 @@ try:
 except Exception:
     pass
 
+# Tickers visibles en el PDF
 MACRO_TICKERS = {
     '^GSPC':     'S&P 500',
+    '^STOXX50E': 'Euro Stoxx 50',
     'EEM':       'EM Equities',
-    '^STOXX50E': 'Europa',
-    'TLT':       'Bonos 20yr',
-    'HYG':       'High Yield',
+    'FXI':       'China (FXI)',
+    'EWJ':       'Japon (EWJ)',
+    'TLT':       '20Y Treasury',
+    'IEF':       '7-10Y Treasury',
+    'SHY':       '1-3Y Treasury',
+    'HYG':       'High Yield ETF',
+    'LQD':       'IG Corp ETF',
     '^VIX':      'VIX',
     '^VVIX':     'VVIX',
     '^VIX3M':    'VIX3M',
     'GC=F':      'Oro',
-    'DX-Y.NYB':  'DXY',
+    'SI=F':      'Plata',
+    'HG=F':      'Cobre',
     'CL=F':      'Oil WTI',
     'BZ=F':      'Brent',
     'NG=F':      'Nat Gas',
-    'HG=F':      'Cobre',
+    'DX-Y.NYB':  'DXY',
+    'EURUSD=X':  'EUR/USD',
     'USDJPY=X':  'USD/JPY',
+    'USDCNH=X':  'USD/CNH',
     'USDCLP=X':  'USD/CLP',
+    'RSP':       'S&P Equal Wt',
+    'BTC-USD':   'Bitcoin',
 }
+
+# Tickers solo para calculos internos (no aparecen en PDF)
+CALC_TICKERS = ['SPY', 'TIP']
+
+# Todos los tickers a descargar
+ALL_TICKERS = list(MACRO_TICKERS.keys()) + CALC_TICKERS
 
 NEWS_FEEDS = [
     # Mercados
@@ -149,24 +166,342 @@ def ytd_ret(s):
 
 # ── data layer ────────────────────────────────────────────────────────────────
 def get_series():
-    all_t = list(MACRO_TICKERS.keys())
-    print(f'  Descargando {len(all_t)} tickers (6 meses)...')
+    print(f'  Descargando {len(ALL_TICKERS)} tickers (6 meses)...')
     try:
-        raw = yf.download(all_t, period='6mo', auto_adjust=True, progress=False, threads=True)
-        closes = (raw['Close'] if 'Close' in raw.columns.get_level_values(0)
-                  else raw.xs('Close', axis=1, level=0))
+        raw = yf.download(ALL_TICKERS, period='6mo', auto_adjust=True, progress=False, threads=True)
+        if isinstance(raw.columns, pd.MultiIndex):
+            closes = raw.xs('Close', axis=1, level=0)
+        else:
+            closes = raw[['Close']] if 'Close' in raw.columns else raw
         closes.index = pd.to_datetime(closes.index)
     except Exception as e:
         print(f'  WARNING yfinance: {e}')
         return pd.DataFrame()
-    return closes.tail(63)
+    # Validacion: descartar columnas con menos de 10 dias de datos
+    valid = [c for c in closes.columns if closes[c].dropna().shape[0] >= 10]
+    return closes[valid].tail(63)
 
 def get_fred():
-    p = os.path.join(DATA_DIR, 'macro', 'macro_snapshot.json')
-    if not os.path.exists(p):
-        return {}
-    with open(p, encoding='utf-8') as f:
-        return json.load(f)
+    """Mantenido por compatibilidad — devuelve dict vacio. Los datos vienen de proxies yfinance."""
+    return {}
+
+
+# ── macro proxies (todo desde yfinance) ──────────────────────────────────────
+def _safe_series(closes, ticker):
+    """Devuelve serie limpia o None si no existe / insuficiente."""
+    if ticker not in closes.columns:
+        return None
+    s = closes[ticker].dropna()
+    return s if len(s) >= 5 else None
+
+def _ratio_series(closes, t1, t2):
+    """Ratio de dos series alineadas. Devuelve None si alguna falta."""
+    s1 = _safe_series(closes, t1)
+    s2 = _safe_series(closes, t2)
+    if s1 is None or s2 is None:
+        return None
+    aligned = pd.concat([s1, s2], axis=1).dropna()
+    if len(aligned) < 5:
+        return None
+    return aligned.iloc[:, 0] / aligned.iloc[:, 1]
+
+def compute_proxies(closes):
+    """Calcula proxies macro a partir de precios de mercado."""
+    proxies = {}
+
+    # Curva de tasas: TLT/SHY — sube = curva empinandose (bull steepener o fear bid en largo)
+    r = _ratio_series(closes, 'TLT', 'SHY')
+    if r is not None:
+        proxies['yield_curve'] = {'series': r, 'label': 'Yield Curve (TLT/SHY)',
+                                   'value': float(r.iloc[-1]), 'chg_m': float(r.pct_change(21).iloc[-1] * 100) if len(r) >= 22 else None}
+
+    # Credito: HYG/LQD — baja = credito deteriorandose (HY abre mas que IG)
+    r = _ratio_series(closes, 'HYG', 'LQD')
+    if r is not None:
+        proxies['credit'] = {'series': r, 'label': 'Credit (HYG/LQD)',
+                              'value': float(r.iloc[-1]), 'chg_m': float(r.pct_change(21).iloc[-1] * 100) if len(r) >= 22 else None}
+
+    # Liquidez/apetito riesgo: SPY/TLT — sube = risk-on, baja = flight to safety
+    r = _ratio_series(closes, 'SPY', 'TLT')
+    if r is not None:
+        proxies['liquidity'] = {'series': r, 'label': 'Risk Appetite (SPY/TLT)',
+                                 'value': float(r.iloc[-1]), 'chg_m': float(r.pct_change(21).iloc[-1] * 100) if len(r) >= 22 else None}
+
+    # Inflacion esperada: TIP/IEF — sube = mercado precio mas inflacion
+    r = _ratio_series(closes, 'TIP', 'IEF')
+    if r is not None:
+        proxies['inflation'] = {'series': r, 'label': 'Inflation Expectations (TIP/IEF)',
+                                 'value': float(r.iloc[-1]), 'chg_m': float(r.pct_change(21).iloc[-1] * 100) if len(r) >= 22 else None}
+
+    # Crecimiento global: Cobre/Oro — sube = growth, baja = defensivo/recession
+    r = _ratio_series(closes, 'HG=F', 'GC=F')
+    if r is not None:
+        proxies['growth'] = {'series': r, 'label': 'Growth (Copper/Gold)',
+                              'value': float(r.iloc[-1]), 'chg_m': float(r.pct_change(21).iloc[-1] * 100) if len(r) >= 22 else None}
+
+    # Stress de volatilidad: VVIX/VIX — alto = vol de la vol elevada (panico en opciones)
+    r = _ratio_series(closes, '^VVIX', '^VIX')
+    if r is not None:
+        proxies['vol_stress'] = {'series': r, 'label': 'Vol Stress (VVIX/VIX)',
+                                  'value': float(r.iloc[-1]), 'chg_m': float(r.pct_change(21).iloc[-1] * 100) if len(r) >= 22 else None}
+
+    # Breadth: RSP/SPY — baja = concentracion (pocas acciones aguantan el indice)
+    r = _ratio_series(closes, 'RSP', 'SPY')
+    if r is not None:
+        proxies['breadth'] = {'series': r, 'label': 'Breadth (RSP/SPY)',
+                               'value': float(r.iloc[-1]), 'chg_m': float(r.pct_change(21).iloc[-1] * 100) if len(r) >= 22 else None}
+
+    # China stress: FXI retorno M + USDCNH retorno M (yuan debil + acciones chinas caen)
+    fxi = _safe_series(closes, 'FXI')
+    cnh = _safe_series(closes, 'USDCNH=X')
+    if fxi is not None and len(fxi) >= 22:
+        proxies['china_fxi_m'] = float(fxi.pct_change(21).iloc[-1] * 100)
+    if cnh is not None and len(cnh) >= 22:
+        proxies['china_cnh_m'] = float(cnh.pct_change(21).iloc[-1] * 100)
+
+    # Brent-WTI spread
+    brent = _safe_series(closes, 'BZ=F')
+    wti   = _safe_series(closes, 'CL=F')
+    if brent is not None and wti is not None:
+        proxies['brent_wti_spread'] = float(brent.iloc[-1] - wti.iloc[-1])
+
+    return proxies
+
+
+def compute_signals(closes, proxies):
+    """Signal engine: calcula 10 señales con z-score. Devuelve lista de dicts."""
+    signals = []
+
+    def zscore(series, window=63):
+        if series is None or len(series) < window // 2:
+            return None
+        s = series.tail(window)
+        mu, sigma = s.mean(), s.std()
+        if sigma == 0:
+            return 0.0
+        return float((s.iloc[-1] - mu) / sigma)
+
+    # 1. Z-score VIX
+    vix = _safe_series(closes, '^VIX')
+    if vix is not None:
+        z = zscore(vix)
+        signals.append({
+            'name': 'VIX z-score',
+            'value': round(float(vix.iloc[-1]), 2),
+            'zscore': round(z, 2) if z is not None else None,
+            'interpretation': (
+                f'VIX {vix.iloc[-1]:.1f} esta {z:+.1f}sigma sobre su media de 63d — '
+                f'{"anormalmente alto para el regimen reciente" if z and z > 2 else "dentro de rango normal" if z and abs(z) < 1 else "levemente elevado"}'
+            ) if z is not None else 'VIX: datos insuficientes'
+        })
+
+    # 2. MOVE proxy (VVIX/VIX)
+    vs = proxies.get('vol_stress')
+    if vs:
+        s = vs['series']
+        z = zscore(s)
+        signals.append({
+            'name': 'MOVE proxy (VVIX/VIX)',
+            'value': round(vs['value'], 3),
+            'zscore': round(z, 2) if z is not None else None,
+            'interpretation': (
+                f'VVIX/VIX = {vs["value"]:.2f} ({z:+.1f}sigma) — '
+                f'{"panico real en opciones: vol de la vol anormalmente alta" if z and z > 2 else "stress de opciones moderado" if z and z > 1 else "estructura de vol normalizada"}'
+            ) if z is not None else 'Vol stress: datos insuficientes'
+        })
+
+    # 3. Correlacion rolling 21D S&P / Oro
+    sp  = _safe_series(closes, '^GSPC')
+    oro = _safe_series(closes, 'GC=F')
+    if sp is not None and oro is not None and len(sp) >= 21 and len(oro) >= 21:
+        aligned = pd.concat([sp, oro], axis=1).dropna().tail(21)
+        corr = float(aligned.iloc[:, 0].pct_change().corr(aligned.iloc[:, 1].pct_change()))
+        signals.append({
+            'name': 'Correlacion S&P/Oro (21D)',
+            'value': round(corr, 3),
+            'zscore': None,
+            'interpretation': (
+                f'Corr S&P/Oro = {corr:+.2f} (21D) — '
+                f'{"ambos caen juntos: liquidacion forzada (margin calls), no risk-off ordenado" if corr > 0.3 else "correlacion negativa normal: risk-off ordenado" if corr < -0.2 else "correlacion baja: mercados en modo mixto"}'
+            )
+        })
+
+    # 4. Correlacion rolling 21D Oil / S&P
+    oil = _safe_series(closes, 'CL=F')
+    if sp is not None and oil is not None and len(sp) >= 21 and len(oil) >= 21:
+        aligned = pd.concat([sp, oil], axis=1).dropna().tail(21)
+        corr_oil = float(aligned.iloc[:, 0].pct_change().corr(aligned.iloc[:, 1].pct_change()))
+        signals.append({
+            'name': 'Correlacion Oil/S&P (21D)',
+            'value': round(corr_oil, 3),
+            'zscore': None,
+            'interpretation': (
+                f'Corr Oil/S&P = {corr_oil:+.2f} (21D) — '
+                f'{"shock de oferta: oil sube mientras equities caen" if corr_oil < -0.3 else "demand-driven: oil y equities se mueven juntos (crecimiento)" if corr_oil > 0.3 else "correlacion baja: drivers desconectados"}'
+            )
+        })
+
+    # 5. Copper/Gold ratio cambio mensual
+    cg = proxies.get('growth')
+    if cg and cg.get('chg_m') is not None:
+        chg = cg['chg_m']
+        signals.append({
+            'name': 'Copper/Gold ratio (M)',
+            'value': round(cg['value'], 4),
+            'zscore': None,
+            'interpretation': (
+                f'Copper/Gold {chg:+.1f}% (M) — '
+                f'{"crecimiento global acelerando: cobre supera al oro" if chg > 3 else "recesion/refugio: oro outperforma al cobre (growth concern)" if chg < -3 else "ratio estable: sin señal direccional clara de crecimiento"}'
+            )
+        })
+
+    # 6. Breadth deteriorando (RSP/SPY)
+    br = proxies.get('breadth')
+    if br:
+        s = br['series']
+        z = zscore(s)
+        chg = br.get('chg_m')
+        signals.append({
+            'name': 'Breadth (RSP/SPY)',
+            'value': round(br['value'], 4),
+            'zscore': round(z, 2) if z is not None else None,
+            'interpretation': (
+                f'RSP/SPY {chg:+.1f}% (M), z={z:+.1f}sigma — '
+                f'{"concentracion extrema: pocas acciones sostienen el indice (fragil)" if z and z < -2 else "breadth deteriorando: underperformance de small/equal weight" if chg and chg < -2 else "breadth saludable: rally amplio"}'
+            ) if z is not None and chg is not None else 'Breadth: datos insuficientes'
+        })
+
+    # 7. Credito deteriorando (HYG/LQD)
+    cr = proxies.get('credit')
+    if cr:
+        s = cr['series']
+        z = zscore(s)
+        chg = cr.get('chg_m')
+        signals.append({
+            'name': 'Credit spread proxy (HYG/LQD)',
+            'value': round(cr['value'], 4),
+            'zscore': round(z, 2) if z is not None else None,
+            'interpretation': (
+                f'HYG/LQD {chg:+.1f}% (M), z={z:+.1f}sigma — '
+                f'{"credito deteriorandose: HY se debilita vs IG — stress crediticio emergente" if z and z < -1.5 else "spread HY/IG estable: stress de equity no contagia credito" if z and abs(z) < 1 else "credito bajo presion moderada"}'
+            ) if z is not None and chg is not None else 'Credit proxy: datos insuficientes'
+        })
+
+    # 8. Curva empinandose (TLT/SHY)
+    yc = proxies.get('yield_curve')
+    if yc:
+        s = yc['series']
+        z = zscore(s)
+        chg = yc.get('chg_m')
+        signals.append({
+            'name': 'Yield Curve (TLT/SHY)',
+            'value': round(yc['value'], 4),
+            'zscore': round(z, 2) if z is not None else None,
+            'interpretation': (
+                f'TLT/SHY {chg:+.1f}% (M), z={z:+.1f}sigma — '
+                f'{"bull steepening: bid en duracion (flight to safety dominante)" if z and z > 1.5 else "bear flattening: largo cae mas que corto (inflation/Fed fear)" if z and z < -1.5 else "curva sin señal direccional clara"}'
+            ) if z is not None and chg is not None else 'Yield curve: datos insuficientes'
+        })
+
+    # 9. DXY vs EM (EEM vs DXY correlacion / divergencia)
+    eem = _safe_series(closes, 'EEM')
+    dxy = _safe_series(closes, 'DX-Y.NYB')
+    if eem is not None and dxy is not None and len(eem) >= 21:
+        eem_m = float(eem.pct_change(21).iloc[-1] * 100)
+        dxy_m = float(dxy.pct_change(21).iloc[-1] * 100) if len(dxy) >= 21 else 0
+        signals.append({
+            'name': 'EM vs DXY (21D)',
+            'value': round(eem_m - dxy_m, 2),
+            'zscore': None,
+            'interpretation': (
+                f'EEM {eem_m:+.1f}% vs DXY {dxy_m:+.1f}% (M) — '
+                f'{"presion de financiamiento USD sobre emergentes: DXY aprieta EM" if dxy_m > 1.5 and eem_m < 0 else "EM outperforman a pesar de DXY fuerte: desacople positivo" if dxy_m > 1 and eem_m > 1 else "EM y DXY en linea con regimen global"}'
+            )
+        })
+
+    # 10. China stress (FXI cae + yuan debil)
+    fxi_m = proxies.get('china_fxi_m')
+    cnh_m = proxies.get('china_cnh_m')
+    if fxi_m is not None:
+        signals.append({
+            'name': 'China stress (FXI + CNH)',
+            'value': round(fxi_m, 2),
+            'zscore': None,
+            'interpretation': (
+                f'FXI {fxi_m:+.1f}% (M){f", USDCNH {cnh_m:+.1f}% (M)" if cnh_m is not None else ""} — '
+                f'{"stress China: equities chinos caen Y yuan se deprecia — doble señal de salida de capital" if fxi_m < -5 and cnh_m and cnh_m > 1 else "equities chinos bajo presion sin depreciacion yuan: stress local no sistemico" if fxi_m < -5 else "China sin señal de stress relevante"}'
+            )
+        })
+
+    return signals
+
+
+def rank_signals(signals):
+    """Ordena señales por magnitud de z-score absoluto. Las sin z-score van al final."""
+    def sort_key(s):
+        z = s.get('zscore')
+        return -abs(z) if z is not None else 0
+    return sorted(signals, key=sort_key)
+
+
+def format_proxies_summary(proxies, signals):
+    """Genera texto de proxies macro para el prompt de Gemini."""
+    lines = []
+
+    # Proxies con retorno mensual
+    proxy_labels = [
+        ('yield_curve', 'Yield Curve (TLT/SHY)'),
+        ('credit',      'Credit (HYG/LQD)'),
+        ('liquidity',   'Risk Appetite (SPY/TLT)'),
+        ('inflation',   'Inflation Exp (TIP/IEF)'),
+        ('growth',      'Growth (Cu/Au)'),
+        ('breadth',     'Breadth (RSP/SPY)'),
+    ]
+    for key, label in proxy_labels:
+        p = proxies.get(key)
+        if p and p.get('chg_m') is not None:
+            chg = p['chg_m']
+            arrow = '↑' if chg > 0 else '↓'
+            lines.append(f'{label}: {arrow}{abs(chg):.1f}% (M)')
+
+    # Spread Brent-WTI
+    spread = proxies.get('brent_wti_spread')
+    if spread is not None:
+        lines.append(f'Brent-WTI spread: ${spread:.1f}')
+
+    return ' | '.join(lines)
+
+
+def summarize_growth(fred=None, proxies=None):
+    if proxies is None:
+        return 'indeterminado'
+    cg = proxies.get('growth')
+    if cg is None or cg.get('chg_m') is None:
+        return 'indeterminado'
+    chg = cg['chg_m']
+    if chg < -3:   return 'contraccion'
+    if chg < 0:    return 'desaceleracion'
+    return 'expansion'
+
+
+def summarize_liquidity(fred=None, proxies=None):
+    if proxies is None:
+        return 'indeterminado'
+    liq = proxies.get('liquidity')
+    if liq is None or liq.get('chg_m') is None:
+        return 'indeterminado'
+    chg = liq['chg_m']
+    return 'expandiendo' if chg > 1 else 'contrayendo' if chg < -1 else 'neutra'
+
+
+def summarize_credit(fred=None, proxies=None):
+    if proxies is None:
+        return 'indeterminado'
+    cr = proxies.get('credit')
+    if cr is None or cr.get('chg_m') is None:
+        return 'indeterminado'
+    chg = cr['chg_m']
+    return 'estable' if chg > -1 else 'tensionado'
 
 def _fg_rating(score):
     if score is None: return 'N/A'
@@ -262,28 +597,7 @@ def get_news(max_items=10):
     return per_source[:max_items]
 
 
-# ── macro helpers ─────────────────────────────────────────────────────────────
-def summarize_growth(fred):
-    ism_m = fred.get('NAPM',   {}).get('value')
-    ism_s = fred.get('NMFNMI', {}).get('value')
-    vals  = [v for v in (ism_m, ism_s) if v is not None]
-    if not vals: return 'indeterminado'
-    avg = sum(vals) / len(vals)
-    if avg < 50: return 'contraccion'
-    if avg < 52: return 'desaceleracion'
-    return 'expansion'
-
-def summarize_liquidity(fred):
-    ch = fred.get('WALCL', {}).get('change')
-    if ch is None: return 'indeterminado'
-    return 'expandiendo' if ch > 0 else 'contrayendo' if ch < 0 else 'neutra'
-
-def summarize_credit(fred):
-    hy = fred.get('BAMLH0A0HYM2', {}).get('value')
-    if hy is None: return 'indeterminado'
-    return 'estable' if hy < 4.0 else 'tensionado'
-
-def detect_tensions(closes, fred, cnn):
+def detect_tensions(closes, proxies, cnn):
     """Detecta contradicciones y anomalias en los datos de mercado."""
     gold_d1  = d1_ret(closes['GC=F'].dropna())  if 'GC=F'  in closes.columns else 0
     sp_d1    = d1_ret(closes['^GSPC'].dropna()) if '^GSPC' in closes.columns else 0
@@ -292,14 +606,16 @@ def detect_tensions(closes, fred, cnn):
     vix      = _scalar(closes['^VIX'].dropna())  if '^VIX'   in closes.columns else 20
     vvix     = _scalar(closes['^VVIX'].dropna()) if '^VVIX'  in closes.columns else None
     vix3m    = _scalar(closes['^VIX3M'].dropna())if '^VIX3M' in closes.columns else None
-    move     = fred.get('MOVE', {}).get('value', None)
-    hy_s     = fred.get('BAMLH0A0HYM2', {}).get('value', 3.0)
     cnn_s    = cnn.get('score', 50)
 
+    credit = summarize_credit(proxies=proxies)
+    growth = summarize_growth(proxies=proxies)
+    liq    = summarize_liquidity(proxies=proxies)
+
     tensions = []
-    if cnn_s and cnn_s < 25 and hy_s < 4.0:
+    if cnn_s and cnn_s < 25 and credit == 'estable':
         tensions.append(
-            f'Fear extremo (CNN {cnn_s}) pero HY spread {hy_s*100:.0f}bps OK '
+            f'Fear extremo (CNN {cnn_s}) pero credito estable (HYG/LQD OK) '
             f'-> no hay crisis crediticia real')
     if gold_d1 is not None and sp_d1 is not None and gold_d1 < -2 and sp_d1 < -1:
         tensions.append(
@@ -313,9 +629,6 @@ def detect_tensions(closes, fred, cnn):
         tensions.append(
             f'Gold +{gold_ytd:.0f}% YTD pero {gold_d1:+.1f}% hoy '
             f'-> probably real yields, NO cambio de tesis')
-    growth = summarize_growth(fred)
-    credit = summarize_credit(fred)
-    liq    = summarize_liquidity(fred)
     if growth == 'contraccion' and credit == 'estable':
         tensions.append('Crecimiento en contraccion pero credito estable -> desaceleracion, no crisis (aun)')
     if liq == 'contrayendo' and vix and vix < 25:
@@ -332,8 +645,9 @@ def detect_tensions(closes, fred, cnn):
         tensions.append(f'VVIX {vvix:.0f} elevado -> mercado comprando proteccion activamente, vol de la vol alta (panico real)')
     if vix and vix3m and vix > vix3m:
         tensions.append(f'VIX {vix:.1f} > VIX3M {vix3m:.1f} -> term structure en backwardation: stress de corto plazo, no sistemico')
-    if move and move > 120:
-        tensions.append(f'MOVE {move:.0f} elevado -> volatilidad en bonos del Tesoro alta, incertidumbre sobre tasas')
+    vs = proxies.get('vol_stress')
+    if vs and vs.get('chg_m') is not None and vs['chg_m'] > 15:
+        tensions.append(f'VVIX/VIX ratio +{vs["chg_m"]:.0f}% (M) -> estructura de vol tensionada, compra activa de proteccion')
     return tensions
 
 
@@ -575,9 +889,11 @@ def _gemini_call(prompt, api_key, max_tokens=800, model=None):
 
 
 # ── ETAPA 1: Interpretacion base ──────────────────────────────────────────────
-def build_interpretation(closes, fred, cnn, btc, news, tensions):
-    macro_txt = format_macro_summary(closes)
-    fred_txt  = format_fred_summary(fred)
+def build_interpretation(closes, proxies, signals, cnn, btc, news, tensions):
+    macro_txt   = format_macro_summary(closes)
+    proxies_txt = format_proxies_summary(proxies, signals)
+    top_sigs    = rank_signals(signals)[:3]
+    sigs_txt    = '\n'.join(f'- {s["name"]}: {s["interpretation"]}' for s in top_sigs)
     news_txt  = '\n'.join(f'- [{a["source"]}] {a["title"]}' for a in news[:8])
     tens_txt  = '\n'.join(f'! {t}' for t in tensions) if tensions else 'Sin tensiones detectadas.'
     cnn_s  = cnn.get('score', 'N/D')
@@ -612,9 +928,12 @@ DATOS DE MERCADO — {TODAY}
 [ACTIVOS] Precio | W (5d) | M (21d) | Q (63d):
 {macro_txt}
 
-[FRED MACRO]:
-{fred_txt}
-Crecimiento: {summarize_growth(fred)} | Liquidez: {summarize_liquidity(fred)} | Credito: {summarize_credit(fred)}
+[MACRO PROXIES (señales de mercado derivadas de precios)]:
+{proxies_txt}
+Crecimiento: {summarize_growth(proxies=proxies)} | Liquidez: {summarize_liquidity(proxies=proxies)} | Credito: {summarize_credit(proxies=proxies)}
+
+[TOP SEÑALES POR Z-SCORE]:
+{sigs_txt}
 
 [SENTIMIENTO] (0=Panico total, 50=Neutro, 100=Euforia maxima — subir = menos miedo, bajar = mas miedo):
 CNN Fear & Greed: {cnn_s}/100 ({cnn_r}) — ZONA: {"panico" if (cnn_s or 50) < 25 else "miedo" if (cnn_s or 50) < 45 else "neutro" if (cnn_s or 50) < 55 else "codicia"}{f', cambio vs ayer: {cnn_ch:+.1f}' if cnn_ch else ''}
@@ -650,9 +969,9 @@ REGLA CRITICA para [mecanismo]:
 DIVERGENCIAS: [el dato que menos encaja con la lectura central, con numero. O "Sin divergencias relevantes".]
 
 ESTADO_MERCADO: [clasifica el estado actual en UNA de estas 3 categorias y justifica con datos:
-  ESTADO 1 — HEDGED FEAR: VIX elevado, credito estable (HY < 400bps), liquidez OK, MOVE < 120. Miedo ordenado.
-  ESTADO 2 — STRESS PROPAGATION: VIX elevado + credito abriendo (HY > 400bps) o MOVE > 120. Stress se propaga.
-  ESTADO 3 — SYSTEMIC EVENT: correlaciones a 1, HY > 600bps, forced selling, liquidez deteriorada.
+  ESTADO 1 — HEDGED FEAR: VIX elevado, credito estable (HYG/LQD sin deterioro M), liquidez OK. Miedo ordenado.
+  ESTADO 2 — STRESS PROPAGATION: VIX elevado + credito deteriorandose (HYG/LQD cae M) o VVIX/VIX muy alto. Stress se propaga.
+  ESTADO 3 — SYSTEMIC EVENT: correlaciones a 1, HYG/LQD colapsa, forced selling, liquidez deteriorada.
   Formato: "Estado X — NOMBRE: [justificacion con 2 datos concretos]".]
 
 TRIGGER_TRANSICION: [una sola oracion: que dato especifico o nivel concreto cambiaria el estado actual al siguiente.
@@ -666,12 +985,11 @@ PROHIBIDO tres senales que digan lo mismo desde tres activos distintos."""
 
 
 # ── ETAPA 2: Secciones ────────────────────────────────────────────────────────
-def build_tldr(interp, cnn, btc, closes, fred):
+def build_tldr(interp, cnn, btc, closes):
     def r1d(t):
         s = closes[t].dropna() if t in closes.columns else None
         return _ret(_scalar(s, -2), _scalar(s)) if s is not None and len(s) >= 2 else 'N/D'
 
-    dgs10 = fred.get('DGS10', {}).get('value', 'N/D')
     sp_q  = _ret(_scalar(closes['^GSPC'].dropna(), 0), _scalar(closes['^GSPC'].dropna())) \
             if '^GSPC' in closes.columns else 'N/D'
 
@@ -688,7 +1006,7 @@ def build_tldr(interp, cnn, btc, closes, fred):
     trigger        = parsed['TRIGGER_TRANSICION']
 
     datos_adicionales = (
-        f"10Y: {dgs10}% | S&P Q: {sp_q} | "
+        f"S&P Q: {sp_q} | "
         f"CNN F&G: {cnn.get('score','N/D')}/100 | BTC F&G: {btc.get('score','N/D')}/100"
     )
 
@@ -784,16 +1102,18 @@ TL;DR prioriza. No explica el marco, no proyecta 3 meses y no falsa la tesis."""
     return _llm_call(prompt, max_tokens=400)
 
 
-def build_3m_view(interp, closes, fred):
+def build_3m_view(interp, closes, proxies):
     oil_m  = _ret(_scalar(closes['CL=F'].dropna(),   -21), _scalar(closes['CL=F'].dropna()))  \
              if 'CL=F'  in closes.columns else 'N/D'
     sp_now = _scalar(closes['^GSPC'].dropna()) if '^GSPC' in closes.columns else 'N/D'
     sp_q   = _ret(_scalar(closes['^GSPC'].dropna(),  0),   _scalar(closes['^GSPC'].dropna())) \
              if '^GSPC' in closes.columns else 'N/D'
     oil_now = _scalar(closes['CL=F'].dropna()) if 'CL=F' in closes.columns else 'N/D'
-    hy     = fred.get('BAMLH0A0HYM2', {}).get('value', 'N/D')
-    dgs10  = fred.get('DGS10',        {}).get('value', 'N/D')
-    t5yie  = fred.get('T5YIE',        {}).get('value', 'N/D')
+    cr  = proxies.get('credit')
+    inf = proxies.get('inflation')
+    hy     = f"HYG/LQD {cr['chg_m']:+.1f}% (M)" if cr and cr.get('chg_m') is not None else 'N/D'
+    dgs10  = 'ver TLT/IEF (proxy)'
+    t5yie  = f"TIP/IEF {inf['chg_m']:+.1f}% (M)" if inf and inf.get('chg_m') is not None else 'N/D'
 
     parsed      = _parse_interp(interp)
     regimen     = parsed['REGIMEN']
@@ -859,14 +1179,15 @@ Sin titulos, sin introduccion, solo los 5 bullets."""
     return _llm_call(prompt, max_tokens=700)
 
 
-def build_wwcm(interp, tensions, closes, fred):
+def build_wwcm(interp, tensions, closes, proxies):
     tens_txt = '\n'.join(f'! {t}' for t in tensions) if tensions else 'Sin tensiones detectadas.'
 
     sp  = _scalar(closes['^GSPC'].dropna())  if '^GSPC'    in closes.columns else 'N/D'
     vix = _scalar(closes['^VIX'].dropna())   if '^VIX'     in closes.columns else 'N/D'
     oil = _scalar(closes['CL=F'].dropna())   if 'CL=F'     in closes.columns else 'N/D'
-    hy  = fred.get('BAMLH0A0HYM2', {}).get('value', 'N/D')
-    dgs = fred.get('DGS10',        {}).get('value', 'N/D')
+    cr  = proxies.get('credit')
+    hy  = f"HYG/LQD {cr['chg_m']:+.1f}% (M)" if cr and cr.get('chg_m') is not None else 'N/D'
+    dgs = 'N/D (proxy: TLT)'
 
     parsed   = _parse_interp(interp)
     regimen  = parsed['REGIMEN']
@@ -874,8 +1195,8 @@ def build_wwcm(interp, tensions, closes, fred):
     senales  = parsed['SENALES']
     estado   = parsed['ESTADO_MERCADO']
     trigger  = parsed['TRIGGER_TRANSICION']
-    move     = fred.get('MOVE',  {}).get('value', 'N/D')
-    dfii10   = fred.get('DFII10',{}).get('value', 'N/D')
+    vs    = proxies.get('vol_stress')
+    vvix_vix = f"{vs['value']:.2f}" if vs else 'N/D'
 
     prompt = f"""Eres un analista macro senior.
 {REGLAS_CONSISTENCIA}
@@ -893,7 +1214,7 @@ SENALES:
 {senales}
 
 PRECIOS ACTUALES (referencia exacta):
-S&P 500: {sp} | VIX: {vix} | Oil WTI: {oil} | HY spread: {hy}% | 10Y Treasury: {dgs}% | Real yield 10Y: {dfii10}% | MOVE: {move}
+S&P 500: {sp} | VIX: {vix} | Oil WTI: {oil} | Credit proxy (HYG/LQD M): {hy} | 10Y Treasury: {dgs} | VVIX/VIX: {vvix_vix}
 
 REGLA OBLIGATORIA: toda variacion porcentual incluye horizonte (1D), (W=5d), (M=21d) o (Q=63d).
 EXCEPCION: Fear & Greed NO tiene horizonte temporal.
@@ -1177,7 +1498,7 @@ class PDF(FPDF):
         stgo_utc_lbl = f'UTC{stgo_offset:+d}'
         ny_utc_lbl   = f'UTC{ny_offset:+d}'
         date_str     = (utc_now + timedelta(hours=stgo_offset)).strftime('%d/%m/%Y')
-        footer1 = f'Generado el {date_str} a las {stgo_time} (Santiago {stgo_utc_lbl}) / {ny_time} (New York {ny_utc_lbl})  |  yfinance + FRED + RSS'
+        footer1 = f'Generado el {date_str} a las {stgo_time} (Santiago {stgo_utc_lbl}) / {ny_time} (New York {ny_utc_lbl})  |  yfinance + RSS'
         self.cell(0, 4, clean(footer1), align='C', ln=True)
         self.cell(0, 4, clean('(*) = interpretacion de Gemini en base a los datos descargados'), align='C')
 
@@ -1324,7 +1645,7 @@ def build_chart_json(closes):
     return chart_json_path
 
 
-def build_pdf(closes, fred, cnn, btc, news, tensions,
+def build_pdf(closes, proxies, cnn, btc, news, tensions,
               interp, tldr, v3, wwcm, usdclp_comment, news_summary=None, chart_path=None):
     pdf = PDF()
     pdf.add_page()
@@ -1336,7 +1657,7 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     pdf.cell(0, 10, clean(f'Vista Macro  {date_fmt}'), ln=True, align='L')
     pdf.set_font('Helvetica', '', 8)
     pdf.set_text_color(130, 130, 140)
-    pdf.cell(0, 5, clean('Macro Brief  |  yfinance + FRED + RSS'), ln=True)
+    pdf.cell(0, 5, clean('Macro Brief  |  yfinance + RSS'), ln=True)
     pdf.ln(4)
     pdf.set_draw_color(200, 200, 210)
     pdf.set_line_width(0.3)
@@ -1443,27 +1764,46 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
         pdf.ln()
     pdf.ln(2)
 
-    # ── Datos FRED clave ──────────────────────────────────────────────────────
-    fred_rows = [
-        ('Fed Funds',   f"{fred.get('FEDFUNDS',{}).get('value','N/D')}%"),
-        ('2Y Yield',    f"{fred.get('DGS2',    {}).get('value','N/D')}%"),
-        ('10Y Yield',   f"{fred.get('DGS10',   {}).get('value','N/D')}%"),
-        ('Real 10Y',    f"{fred.get('DFII10',  {}).get('value','N/D')}%"),
-        ('2s10s',       f"{fred.get('T10Y2Y',  {}).get('value','N/D')}%"),
-        ('HY Spread',   f"{fred.get('BAMLH0A0HYM2',{}).get('value','N/D')}%"),
-        ('IG Spread',   f"{fred.get('BAMLC0A0CM', {}).get('value','N/D')}%"),
-        ('MOVE',        f"{fred.get('MOVE',    {}).get('value','N/D')}"),
+    # ── Proxies macro clave ───────────────────────────────────────────────────
+    def _proxy_val(key, fmt='{:+.1f}%'):
+        p = proxies.get(key)
+        if p and p.get('chg_m') is not None:
+            return fmt.format(p['chg_m'])
+        return 'N/D'
+    brent_wti = proxies.get('brent_wti_spread')
+    proxy_rows = [
+        ('Yield Curve\nTLT/SHY (M)',   _proxy_val('yield_curve')),
+        ('Credit\nHYG/LQD (M)',         _proxy_val('credit')),
+        ('Risk Apetite\nSPY/TLT (M)',   _proxy_val('liquidity')),
+        ('Inflation\nTIP/IEF (M)',       _proxy_val('inflation')),
+        ('Growth\nCu/Au (M)',            _proxy_val('growth')),
+        ('Breadth\nRSP/SPY (M)',         _proxy_val('breadth')),
+        ('Vol Stress\nVVIX/VIX (M)',     _proxy_val('vol_stress')),
+        ('Brent-WTI\nSpread',            f'${brent_wti:.1f}' if brent_wti is not None else 'N/D'),
     ]
-    pdf.set_font('Helvetica', 'B', 7.5)
+    pdf.set_font('Helvetica', 'B', 7)
     pdf.set_fill_color(230, 235, 245)
-    col_w = (pdf.w - pdf.l_margin - pdf.r_margin) / len(fred_rows)
-    for label, _ in fred_rows:
-        pdf.cell(col_w, 5, clean(label), fill=True, align='C')
+    col_w = (pdf.w - pdf.l_margin - pdf.r_margin) / len(proxy_rows)
+    for label, _ in proxy_rows:
+        pdf.cell(col_w, 4.5, clean(label.split('\n')[0]), fill=True, align='C')
+    pdf.ln()
+    pdf.set_font('Helvetica', '', 6.5)
+    pdf.set_fill_color(248, 248, 252)
+    for label, _ in proxy_rows:
+        sub = label.split('\n')[1] if '\n' in label else ''
+        pdf.set_font('Helvetica', 'I', 6)
+        pdf.cell(col_w, 4, clean(sub), fill=True, align='C')
     pdf.ln()
     pdf.set_font('Helvetica', '', 7.5)
     pdf.set_fill_color(248, 248, 252)
-    for _, val in fred_rows:
+    for _, val in proxy_rows:
+        try:
+            v = float(val.replace('%','').replace('+','').replace('$','').replace('N/D',''))
+            pdf.set_text_color(180, 0, 0) if v < 0 else pdf.set_text_color(0, 130, 0)
+        except Exception:
+            pdf.set_text_color(80, 80, 80)
         pdf.cell(col_w, 5, clean(val), fill=True, align='C')
+        pdf.set_text_color(0, 0, 0)
     pdf.ln()
     pdf.ln(2)
 
@@ -1607,8 +1947,6 @@ def build_pdf(closes, fred, cnn, btc, news, tensions,
     if oil is not None: factors.append(('Oil WTI',    f'${_scalar(oil):.1f}',   ytd(oil), ('alto = CLP -', False)))
     if vix is not None: factors.append(('VIX',        f'{_scalar(vix):.1f}',    ytd(vix), ('alto = CLP -', False)))
     if sp  is not None: factors.append(('S&P 500',    'YTD',                    ytd(sp),  ('sube = CLP +', True)))
-    ff = fred.get('FEDFUNDS', {}).get('value')
-    if ff: factors.append(('Fed Funds', f'{ff:.2f}%', '---', ('alto = CLP -', False)))
 
     for name, val, ytd_v, (eff, positive) in factors:
         pdf.set_font('Helvetica', '', 8)
@@ -1782,15 +2120,17 @@ def run():
     # 1. Datos
     print('\n[1/3] Recopilando datos...')
     closes   = get_series()
-    fred     = get_fred()
+    proxies  = compute_proxies(closes)
+    signals  = compute_signals(closes, proxies)
     cnn      = get_cnn_fg()
     btc      = get_btc_fg()
     news     = get_news(max_items=10)
-    tensions = detect_tensions(closes, fred, cnn)
+    tensions = detect_tensions(closes, proxies, cnn)
 
     ok_tickers = len([c for c in closes.columns if not closes[c].dropna().empty]) if not closes.empty else 0
     print(f'  Series:    {ok_tickers}/{len(MACRO_TICKERS)} tickers')
-    print(f'  FRED:      {len(fred)} series')
+    print(f'  Proxies:   {len(proxies)} calculados')
+    print(f'  Señales:   {len(signals)} (top z-score: {rank_signals(signals)[0]["name"] if signals else "N/A"})')
     print(f'  CNN F&G:   {cnn.get("score","N/D")} ({cnn.get("rating","N/A")})')
     print(f'  BTC F&G:   {btc.get("score","N/D")} ({btc.get("rating","N/A")})')
     print(f'  Noticias:  {len(news)} articulos')
@@ -1817,7 +2157,7 @@ def run():
     else:
         # 2. Etapa 1 — Interpretacion base
         print('\n[2/3] Gemini — Etapa 1: Interpretacion base...')
-        interp = build_interpretation(closes, fred, cnn, btc, news, tensions)
+        interp = build_interpretation(closes, proxies, signals, cnn, btc, news, tensions)
         if interp:
             print('  OK\n' + '-' * 55)
             print(interp)
@@ -1832,13 +2172,13 @@ def run():
         # 3. Etapa 2 — Secciones
         print('\n[3/3] Gemini — Etapa 2: Secciones...')
         print('  TL;DR...')
-        tldr           = build_tldr(interp, cnn, btc, closes, fred)
+        tldr           = build_tldr(interp, cnn, btc, closes)
         time.sleep(15)
         print('  3M View...')
-        v3             = build_3m_view(interp, closes, fred)
+        v3             = build_3m_view(interp, closes, proxies)
         time.sleep(15)
         print('  WWCM...')
-        wwcm           = build_wwcm(interp, tensions, closes, fred)
+        wwcm           = build_wwcm(interp, tensions, closes, proxies)
         time.sleep(15)
         print('  USDCLP...')
         usdclp_comment = build_usdclp_comment(interp, closes)
@@ -1875,7 +2215,7 @@ def run():
         f.write(md)
 
     try:
-        pdf = build_pdf(closes, fred, cnn, btc, news, tensions,
+        pdf = build_pdf(closes, proxies, cnn, btc, news, tensions,
                         interp, tldr, v3, wwcm, usdclp_comment, news_summary=news_summary,
                         chart_path=chart_path)
         pdf.output(pdf_path)

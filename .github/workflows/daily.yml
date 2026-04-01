@@ -24,14 +24,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Download FRED data
-        env:
-          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-        run: python download_macro_fred.py
-
       - name: Run Pipeline 3
         env:
-          FRED_API_KEY:       ${{ secrets.FRED_API_KEY }}
           GEMINI_API_KEY_1:   ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2:   ${{ secrets.GEMINI_API_KEY_2 }}
           GEMINI_API_KEY_3:   ${{ secrets.GEMINI_API_KEY_3 }}
