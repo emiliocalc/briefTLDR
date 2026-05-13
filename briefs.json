@@ -1,5 +1,11 @@
 [
   {
+    "date": "2026-05-13",
+    "pdf": "data/daily_summaries/2026-05-13_p3.pdf",
+    "md": "data/daily_summaries/2026-05-13_p3.md",
+    "chart": "data/daily_summaries/2026-05-13_chart.json"
+  },
+  {
     "date": "2026-05-12",
     "pdf": "data/daily_summaries/2026-05-12_p3.pdf",
     "md": "data/daily_summaries/2026-05-12_p3.md",
