@@ -1,5 +1,11 @@
 [
   {
+    "date": "2026-07-01",
+    "pdf": "data/daily_summaries/2026-07-01_p3.pdf",
+    "md": "data/daily_summaries/2026-07-01_p3.md",
+    "chart": "data/daily_summaries/2026-07-01_chart.json"
+  },
+  {
     "date": "2026-06-30",
     "pdf": "data/daily_summaries/2026-06-30_p3.pdf",
     "md": "data/daily_summaries/2026-06-30_p3.md",
